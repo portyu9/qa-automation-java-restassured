@@ -42,7 +42,3 @@ The API tests target [JSONPlaceholder](https://jsonplaceholder.typicode.com/), a
 ## Continuous Integration
 
 GitHub Actions will automatically run on every push and pull request. The workflow sets up the correct Java version, caches Maven dependencies and runs `mvn test`. Failing tests will mark the build as failed.
-
-## License
-
-This project is licensed under the MIT License.
