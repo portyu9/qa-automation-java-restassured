@@ -1,6 +1,6 @@
 # QA Automation: Java RestAssured Sample
 
-I created this repository to demonstrate a production‑grade API and database test automation framework in Java. This project uses modern libraries such as **RestAssured** for HTTP assertions, **Testcontainers** for spinning up disposable PostgreSQL databases during integration tests, and **WireMock** for mocking external services. The test suite targets a real public API (JSONPlaceholder) and includes examples of contract validation, service‑layer tests and data persistence checks.
+I created this repository to demonstrate a production‑grade API and database test automation framework in Java. This project uses modern libraries such as **RestAssured** for HTTP assertions, **Testcontainers** for spinning up disposable PostgreSQL databases during integration tests, and **WireMock** for mocking external services. The test suite targets a real public API (JSONPlaceholder) and includes examples of contract validation, service‑layer tests and data persistence checks with GitHub Actions CI.
 
 ## Features
 
