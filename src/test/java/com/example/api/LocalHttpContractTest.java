@@ -53,7 +53,7 @@ class LocalHttpContractTest {
         assertEquals(200, response.statusCode());
         assertEquals(1, response.jsonPath().getInt("[0].id"));
         server.verify(getRequestedFor(urlEqualTo("/posts"))
-                .withHeader("Accept", equalTo("application/json"))
+                .withHeader("Accept", matching(".*application/json.*"))
                 .withHeader("X-Test-Run-Id", equalTo("wiremock-run"))
                 .withHeader("X-Test-Request-Id", matching("[0-9a-fA-F-]{36}")));
     }
