@@ -20,6 +20,7 @@ public final class ApiSpecs {
                 .setBaseUri(config.baseUri().toString())
                 .setAccept(ContentType.JSON)
                 .addHeader("X-Test-Run-Id", config.runId())
+                .addFilter(new RequestDiagnosticsFilter())
                 .setConfig(RestAssuredConfig.config().httpClient(httpConfig))
                 .build();
     }
