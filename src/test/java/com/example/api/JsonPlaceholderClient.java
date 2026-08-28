@@ -33,7 +33,6 @@ public class JsonPlaceholderClient {
                 .get("/posts")
                 .then()
                 .spec(ApiSpecs.jsonResponse())
-                .log().ifValidationFails()
                 .extract().response();
     }
 
@@ -46,7 +45,6 @@ public class JsonPlaceholderClient {
                 .get("/posts/{id}")
                 .then()
                 .spec(ApiSpecs.jsonResponse())
-                .log().ifValidationFails()
                 .extract().response();
     }
 }
