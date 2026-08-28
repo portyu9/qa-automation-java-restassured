@@ -1,47 +1,64 @@
-# Java / REST Assured API Automation Framework
+# Java / REST Assured Quality Engineering Framework
 
-A Java API and persistence test framework using REST Assured, JUnit 5, Hamcrest, JSON Schema validation, Testcontainers, and Maven. Shared request specifications enforce runtime configuration and transport budgets; a native REST Assured filter adds request-level correlation and bounded diagnostics; API tests combine protocol, semantic, and version-controlled schema assertions.
+[![CI](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/ci.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/ci.yml)
+[![Extended](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/extended.yml)
+[![Security](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/security.yml)
 
-## Engineering contract
+A Java API and persistence quality-engineering framework using **REST Assured**, **JUnit 5**, **Hamcrest**, **JSON Schema**, **WireMock**, **Testcontainers**, PostgreSQL, and Maven lifecycle separation. Shared request specifications enforce validated runtime configuration, transport budgets, run correlation, and request-level diagnostics while tests retain normal REST Assured responses and assertions.
 
-| Concern | Framework policy |
-| --- | --- |
-| Configuration | Environment values are parsed into immutable `TestConfig` with URI and timeout validation. |
-| Request policy | Base URI, accepted content type, run correlation, transport timeouts, and diagnostics are composed in one shared request specification. |
-| Request correlation | Every request receives a unique `X-Test-Request-Id` in addition to the run-level `X-Test-Run-Id`. |
-| Diagnostics | The REST Assured filter logs method/status/duration/error class only; automatic payload and credential dumps are avoided. |
-| Assertions | Protocol checks, semantic values, and JSON Schema validation are complementary. |
-| Persistence | Integration tests use containerized PostgreSQL where a real database boundary is required. |
-| Build lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest` verification. |
-| Compatibility | CI validates Java 17 and 21 fast layers and runs full integration verification on Java 17. |
+> [!IMPORTANT]
+> The framework separates **HTTP policy**, **API semantics**, **deterministic dependency behavior**, and **real persistence integration**. A local WireMock boundary should prove transport/protocol contracts; a PostgreSQL container should prove database semantics; neither should be introduced when an in-process assertion can prove the requirement more directly.
 
-## Architecture
+## Capability map
+
+| Plane | What it proves | Boundary | Evidence |
+| --- | --- | --- | --- |
+| Fast API | Protocol + schema + semantic behavior | REST Assured HTTP client | Surefire reports + request diagnostics |
+| Local HTTP contract | Shared headers/correlation + error-status behavior | WireMock dynamic port | JUnit/Surefire |
+| Persistence integration | PostgreSQL driver/schema/transaction behavior | Testcontainers PostgreSQL | Failsafe reports |
+| Compatibility | Java runtime compatibility | Java 17 + 21 | Matrix test reports |
+| Extended lifecycle | Full API + WireMock + PostgreSQL lifecycle on Java 21 | `mvn verify` | Surefire + Failsafe |
+| Security | Dependency/configuration exposure | Pinned Trivy filesystem scan | JSON findings + Markdown summary |
+| Observability | Run/runtime identity | Structured CI envelope + request IDs | `reports/ci-observability-*.json`, Actions summary |
 
 ```mermaid
-flowchart LR
-    J[Junit 5 tests] --> CLIENT[JsonPlaceholderClient]
+flowchart TD
+    J[Junit tests] --> CLIENT[JsonPlaceholderClient]
     CLIENT --> SPEC[ApiSpecs]
     SPEC --> CFG[TestConfig]
     SPEC --> FILTER[RequestDiagnosticsFilter]
     SPEC --> RA[REST Assured]
-    RA --> API[HTTP API]
-    J --> SCHEMA[JSON Schemas]
-    DBTEST[PostgresIntegrationTest] --> TC[Testcontainers]
+    RA --> API[Configured API]
+    LOCAL[LocalHttpContractTest] --> WM[WireMock]
+    CLIENT --> WM
+    DB[PostgresIntegrationTest] --> TC[Testcontainers]
     TC --> PG[(PostgreSQL)]
 ```
 
-Framework policy is composed through REST Assured rather than hidden behind a custom HTTP DSL. Tests still use normal REST Assured responses and Hamcrest assertions.
+## Engineering invariants
 
-## Repository layout
+| Concern | Framework contract |
+| --- | --- |
+| Configuration | `TestConfig` validates base URI, timeout budgets, and run identity before requests. |
+| Request policy | Base URI, JSON Accept, run ID, transport budgets, and diagnostics are composed once in `ApiSpecs`. |
+| Correlation | Every request has `X-Test-Run-Id` plus a generated `X-Test-Request-Id`. |
+| Diagnostics | Shared filter logs method/status/duration/error class—not arbitrary bodies or credentials. |
+| Assertions | Protocol, structure, and semantics are complementary contracts. |
+| Local dependency simulation | WireMock is used when HTTP behavior itself is under test. |
+| Persistence integration | Testcontainers is used when PostgreSQL semantics are material. |
+| Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest` verification. |
+| Compatibility | Java 17/21 fast validation; extended Java 21 full verification supplements Java 17 full CI. |
+
+## Repository map
 
 ```text
 .
 ├── src/test/java/com/example/
 │   ├── api/
 │   │   ├── JsonPlaceholderClient.java
-│   │   └── PostApiTest.java
-│   ├── db/
-│   │   └── PostgresIntegrationTest.java
+│   │   ├── PostApiTest.java
+│   │   └── LocalHttpContractTest.java
+│   ├── db/PostgresIntegrationTest.java
 │   └── framework/
 │       ├── ApiSpecs.java
 │       ├── RequestDiagnosticsFilter.java
@@ -53,203 +70,247 @@ Framework policy is composed through REST Assured rather than hidden behind a cu
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   └── TEST_STRATEGY.md
-├── pom.xml
-└── .github/workflows/ci.yml
+├── .github/workflows/
+│   ├── ci.yml
+│   ├── extended.yml
+│   └── security.yml
+└── pom.xml
 ```
 
 ## Quick start
 
 Prerequisites:
 
-- Java 17 or newer;
+- Java 17+;
 - Maven 3.9+;
-- Docker-compatible container runtime for integration tests.
+- Docker-compatible runtime for integration verification.
 
-Fast test gate:
-
-```bash
-mvn -B -Pfast test
-```
-
-Full verification, including Failsafe integration tests:
+Fast gate:
 
 ```bash
-mvn -B verify
+mvn -B -ntp -Pfast test
 ```
 
-The Maven Enforcer configuration rejects unsupported Java/Maven versions before test execution.
+Full lifecycle:
+
+```bash
+mvn -B -ntp verify
+```
+
+The Maven Enforcer plugin rejects unsupported Java/Maven versions before the test lifecycle proceeds.
+
+<details>
+<summary><strong>Lifecycle reference</strong></summary>
+
+| Invocation | Primary scope |
+| --- | --- |
+| `mvn -B -ntp -Pfast test` | Surefire fast API/framework/WireMock tests; skips integration verification. |
+| `mvn -B -ntp test` | Surefire fast tests. |
+| `mvn -B -ntp verify` | Surefire + Failsafe integration lifecycle. |
+
+`*IntegrationTest` naming is part of lifecycle ownership. Do not make a test “fast” or “integration” through ad-hoc shell filtering when Maven already has a first-class lifecycle boundary.
+
+</details>
 
 ## Runtime configuration
 
-`TestConfig` is the environment boundary for HTTP behavior.
+`TestConfig` is the HTTP configuration boundary.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `TEST_BASE_URL` | API base URI | `https://jsonplaceholder.typicode.com` |
-| `TEST_CONNECT_TIMEOUT_MS` | HTTP connection budget | `5000` |
-| `TEST_READ_TIMEOUT_MS` | HTTP socket/read budget | `15000` |
-| `TEST_RUN_ID` | Run-level correlation identifier | generated UUID |
+| `TEST_CONNECT_TIMEOUT_MS` | Connection budget | `5000` |
+| `TEST_READ_TIMEOUT_MS` | Socket/read budget | `15000` |
+| `TEST_RUN_ID` | Run correlation | generated UUID |
 
-The base URI must be absolute HTTP(S). Timeout values must be positive integers. Invalid values fail before requests are executed.
+The base URI must be absolute HTTP(S), have a hostname, and contain no URL credentials, query string, or fragment. Timeout values must be positive.
 
-## Request specification
+## Shared request specification
 
-`ApiSpecs.request(config)` composes the reusable request policy:
+`ApiSpecs.request(config)` composes cross-cutting request behavior:
 
-- configured base URI;
+- validated base URI;
 - `Accept: application/json`;
-- `X-Test-Run-Id` run correlation;
+- `X-Test-Run-Id`;
 - connect/socket timeout configuration;
 - `RequestDiagnosticsFilter`.
 
-`ApiSpecs.jsonResponse()` supplies the shared JSON response content-type expectation.
+`ApiSpecs.jsonResponse()` provides the common JSON content-type expectation.
 
-The specification is policy, not a custom client language. Endpoint behavior remains visible in `JsonPlaceholderClient` and tests retain native REST Assured responses.
+The specification is policy—not a new HTTP language. Endpoint operations remain explicit in `JsonPlaceholderClient`, and tests still inspect native REST Assured `Response` objects.
 
 ## Correlation and diagnostics
 
-Two correlation levels are intentionally separate:
-
 ```text
 Test run
-└── X-Test-Run-Id: gha-12345-1
-    ├── X-Test-Request-Id: <uuid-1>
-    ├── X-Test-Request-Id: <uuid-2>
-    └── X-Test-Request-Id: <uuid-3>
+└── X-Test-Run-Id
+    ├── X-Test-Request-Id: uuid-1
+    ├── X-Test-Request-Id: uuid-2
+    └── X-Test-Request-Id: uuid-3
 ```
 
-`RequestDiagnosticsFilter` creates the request ID immediately before transport execution. It measures elapsed time and emits bounded diagnostics for:
+`RequestDiagnosticsFilter` generates request identity immediately before transport, measures elapsed time, and emits bounded metadata for HTTP 4xx/5xx responses or runtime/transport exceptions.
 
-- HTTP status 400+;
-- transport/runtime exceptions.
+Automatic shared diagnostics exclude:
 
-Automatic log fields are limited to request ID, method, status, duration, and exception class. The filter intentionally avoids request bodies, response bodies, authorization headers, cookies, and full URLs as a safe default for shared CI logs.
+- request/response bodies;
+- authorization values;
+- cookies;
+- full URLs.
 
-Tests can still inspect response bodies explicitly when those values are part of the assertion contract.
+Tests remain free to assert response bodies explicitly when those values are part of the contract.
 
 ## API assertion depth
 
-A meaningful API test generally covers multiple dimensions:
+A meaningful API test generally addresses multiple independent dimensions:
 
-1. **Protocol** — status and content type.
+1. **Protocol** — status/content type.
 2. **Structure** — JSON Schema.
-3. **Semantics** — identifiers and critical values.
-4. **Boundary behavior** — invalid inputs and dependency failures where applicable.
-5. **Side effects** — persistence/event state for mutating APIs when observable.
+3. **Semantics** — identifiers and business-critical values.
+4. **Boundary behavior** — invalid/error responses.
+5. **Side effects** — persistence/event state when the API mutates observable state.
 
-The posts tests currently prove:
-
-- list response is successful JSON;
-- list is non-empty;
-- required identifiers are positive;
-- title/body values are non-empty;
-- every list item satisfies the collection schema;
-- a requested post ID is returned unchanged;
-- the single resource satisfies its dedicated object schema.
+A schema-valid response can still be the wrong resource. A 200 response can still violate business semantics. A semantic assertion without a structure contract can miss incompatible shape drift.
 
 ## JSON Schema strategy
 
-Two schemas are maintained because list and item endpoints have different top-level contracts:
+List and item endpoints have different top-level structures, so they use distinct version-controlled schemas:
 
 ```text
 post-schema.json
-└── array
-    └── post object
+└── array of post objects
 
 single-post-schema.json
-└── post object
+└── one post object
 ```
 
-Both schemas constrain required fields and basic semantic minima. `additionalProperties: true` permits additive provider fields without making every harmless response expansion a breaking test change.
+Required fields and semantic minima are constrained while `additionalProperties: true` permits additive provider fields without turning harmless expansions into false breaking changes.
 
-Schema assertions do not replace semantic assertions. A response may be structurally valid while returning the wrong requested resource.
+## Deterministic HTTP boundary with WireMock
 
-## Database integration layer
+`LocalHttpContractTest` uses a dynamic-port `WireMockServer` to verify behavior at the actual HTTP boundary without public-service variability.
 
-`PostgresIntegrationTest` belongs to the Maven integration-test lifecycle and uses Testcontainers to provision a real PostgreSQL boundary. Containerized integration tests are appropriate when SQL dialect, transaction behavior, schema compatibility, or driver interaction matters.
+It proves that the existing client sends:
 
-Prefer an in-process/fake boundary for logic that does not require PostgreSQL semantics. A container should prove a real integration property, not merely make a test appear more realistic.
+- `Accept: application/json`;
+- the configured `X-Test-Run-Id`;
+- a generated UUID-shaped `X-Test-Request-Id`.
 
-## Maven lifecycle
+It also verifies that a JSON `503` remains visible to the test as a protocol/error response rather than being hidden by a custom client wrapper.
 
-The project separates test speeds through standard Maven plugins:
+> [!NOTE]
+> WireMock is appropriate here because headers, status, and transport-visible behavior are the subject. It should not be used to replace simple pure/unit assertions that do not require HTTP semantics.
 
-| Lifecycle | Plugin | Scope |
-| --- | --- | --- |
-| `test` | Surefire | Fast unit/API/framework tests; excludes `*IntegrationTest`. |
-| `verify` | Failsafe | Integration tests such as containerized PostgreSQL. |
-| `-Pfast test` | Fast profile | Explicit pull-request-friendly execution without integration verification. |
+## PostgreSQL integration boundary
 
-This keeps test selection visible to Maven tooling and CI rather than relying on custom shell filtering.
+`PostgresIntegrationTest` belongs to Failsafe and provisions a real PostgreSQL container when SQL dialect, schema compatibility, transaction semantics, or driver behavior matters.
+
+A container is not a realism badge. It is justified only when the real external-system semantics are part of the requirement.
+
+## Compatibility and extended validation
+
+Primary CI:
+
+- fast tests on Java 17 and 21;
+- full `mvn verify` on Java 17.
+
+`extended.yml` runs full `mvn verify` on Java 21, adding a second full-lifecycle signal for:
+
+- REST Assured/JUnit behavior;
+- WireMock local HTTP contract;
+- Maven Surefire/Failsafe integration;
+- PostgreSQL Testcontainers runtime compatibility.
+
+This keeps ordinary CI efficient while still validating the complete stack on both supported Java generations over the combined primary/extended gates.
+
+## Security engineering
+
+`.github/workflows/security.yml` uses open-source Trivy filesystem scanning. The GitHub Action is pinned to immutable commit `ed142fd0673e97e23eac54620cfb913e5ce36c25` (`v0.36.0`) with Trivy engine `v0.74.0`.
+
+The configured blocking set focuses on fixed HIGH/CRITICAL dependency vulnerabilities and HIGH/CRITICAL supported repository/configuration misconfigurations. `reports/security/trivy.json` and `summary.md` are retained for remediation-focused triage.
+
+## Observability model
+
+CI combines two levels of correlation:
+
+```text
+GitHub Actions run
+└── TEST_RUN_ID
+    ├── Java runtime dimension
+    ├── per-request X-Test-Request-Id
+    ├── Surefire/Failsafe reports
+    └── reports/ci-observability-java-<version>.json
+```
+
+The CI envelope contains schema version, framework identity, run ID, Java dimension, final job status, SHA, and ref. It is intentionally small and vendor-neutral; detailed failure semantics remain in JUnit/Maven reports and request diagnostics.
+
+No external telemetry backend is required. The JSON records can later feed open-source collectors/log stores without embedding a telemetry provider into the tests.
 
 ## CI topology
 
 ```mermaid
 flowchart TD
-    PR[Push / pull request] --> J17[Fast Maven tests
-Java 17]
-    PR --> J21[Fast Maven tests
-Java 21]
-    J17 --> INT[Full mvn verify
-Java 17 + containers]
-    J21 --> DONE[Compatibility signal]
-    INT --> ART[Surefire + Failsafe evidence]
+    PR[Push / PR] --> J17[Fast · Java 17]
+    PR --> J21[Fast · Java 21]
+    J17 --> FULL17[Full verify · Java 17]
+    PR --> SEC[Trivy security]
+    CODECHANGE[API/framework/persistence change] --> EXT[Extended]
+    EXT --> FULL21[Full verify · Java 21]
+    FULL17 --> EV[Surefire + Failsafe + observability]
+    FULL21 --> EV
 ```
-
-CI uses current Java setup actions, Maven caching, separate fast/integration jobs, and bounded test-result artifacts.
 
 ## Failure triage
 
-| Signal | Likely boundary | First action |
+| Signal | Boundary | First action |
 | --- | --- | --- |
-| Enforcer failure | Toolchain | Use supported Java/Maven versions. |
-| `TestConfig` exception | Runtime configuration | Correct URI/timeout environment values. |
-| Transport exception diagnostic | Network/dependency | Inspect connectivity and timeout class before assertions. |
-| HTTP 4xx/5xx diagnostic | API/dependency behavior | Use request ID to correlate external logs if available. |
-| JSON Schema failure | Structural contract | Compare provider shape and versioned schema. |
-| Hamcrest semantic failure | Business/API behavior | Inspect the specific response field being asserted. |
-| Testcontainers startup failure | Docker/runner infrastructure | Inspect container runtime, image pull, and resource availability. |
-| Failsafe-only failure | Integration boundary | Keep fast test conclusions separate from database integration diagnosis. |
+| Enforcer failure | Toolchain | Use supported Java/Maven versions |
+| `TestConfig` failure | Runtime input | Correct URI/timeout/run configuration |
+| WireMock contract failure | Shared HTTP policy | Inspect outbound header/status semantics |
+| Transport exception diagnostic | Dependency/network | Classify connectivity/timeout before assertions |
+| HTTP 4xx/5xx | Protocol/application/dependency | Correlate by request ID |
+| JSON Schema failure | Structural contract | Compare response shape and schema |
+| Hamcrest semantic failure | API behavior | Inspect asserted field/value |
+| Testcontainers startup | Runtime infrastructure | Inspect Docker/image/resources |
+| Failsafe-only failure | Persistence integration | Keep integration diagnosis separate from fast API conclusions |
+| Java-21-only full failure | Runtime compatibility | Compare tool/runtime behavior before changing semantics |
+| Trivy failure | Dependency/configuration risk | Triage exact JSON finding/remediation |
 
-Avoid enabling broad REST Assured body logging globally as a first response. It creates noisy CI output and can leak sensitive payloads.
+> [!WARNING]
+> Broad REST Assured body logging is not a first-response debugging strategy. It increases noise and can leak payloads while doing nothing to classify the failing boundary.
 
 ## Extension rules
 
-When adding an API resource:
+When adding API behavior:
 
-- add client methods that represent resource operations rather than a generic HTTP wrapper;
-- use the shared request/response specifications;
-- keep run/request correlation intact;
-- add a version-controlled schema where structural validation adds value;
-- add semantic assertions for critical business values;
-- keep automatic diagnostics payload-safe;
-- use integration tests only when an actual external-system semantic is required.
+1. keep resource operations explicit in the client;
+2. reuse shared request/response policy;
+3. preserve run/request correlation;
+4. add version-controlled schemas where structural validation matters;
+5. assert critical semantics separately from shape;
+6. use WireMock when HTTP dependency behavior is the requirement;
+7. use Testcontainers only when real external-system semantics are required;
+8. add framework-contract tests for new cross-cutting policy;
+9. keep Maven lifecycle ownership explicit;
+10. keep automatic diagnostics bounded and payload-safe.
 
-When adding framework policy:
+## Explicit anti-patterns
 
-- extend `TestConfig` for new environment inputs;
-- extend `ApiSpecs` for common REST Assured policy;
-- use filters for cross-cutting request/response observation;
-- add `FrameworkContractTest` coverage for infrastructure invariants where possible;
-- keep Maven lifecycle boundaries explicit.
-
-## Anti-patterns
-
-The framework intentionally avoids:
-
-- environment parsing inside individual tests;
-- unbounded request timeouts;
-- full request/response body logging as a global failure hook;
-- one schema reused for endpoints with different top-level shapes;
-- status-code-only API tests;
-- client methods that merely expose `get(path)`/`post(path)` generically;
+- environment parsing inside tests;
+- unbounded HTTP timeouts;
+- global body logging;
+- one schema forced onto different endpoint shapes;
+- status-code-only tests;
+- generic client methods that only expose HTTP verbs/paths;
 - Testcontainers for logic that can be proven in-process;
-- mixing integration tests into the fast Surefire gate by naming accident;
-- retries that hide deterministic assertion failures.
+- integration tests accidentally entering Surefire by naming drift;
+- retries hiding deterministic assertions;
+- local WireMock tests treated as proof of provider availability.
 
-## Further design documentation
+## Design references
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — REST Assured, configuration, API client, and persistence boundaries.
-- [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — layer selection, schema/semantic assertions, integration policy, and release gates.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — REST Assured, configuration, correlation, dependency, and persistence boundaries.
+- [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — assertion depth, deterministic HTTP boundaries, integration policy, and gates.
 
-The framework should keep each API failure attributable to **configuration**, **transport**, **protocol**, **structure**, **semantics**, or **persistence integration** while preserving the native REST Assured/JUnit debugging experience.
+> [!TIP]
+> API-test depth is not the number of libraries involved. It is the precision with which the suite can distinguish configuration, transport, protocol, structure, semantics, and persistence failures while keeping each test at the cheapest boundary that can prove the requirement.
