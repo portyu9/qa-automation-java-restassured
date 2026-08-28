@@ -4,6 +4,21 @@
 [![Extended](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/extended.yml)
 [![Security](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/security.yml)
 
+[![Java](https://img.shields.io/badge/Java-17%20%7C%2021-ED8B00)](https://www.java.com/)
+[![Maven](https://img.shields.io/badge/Maven-3.9%2B-C71A36)](https://maven.apache.org/)
+[![REST Assured](https://img.shields.io/badge/REST%20Assured-6.0.1-6E7781)](https://rest-assured.io/)
+[![JUnit](https://img.shields.io/badge/JUnit-5.10-25A162)](https://junit.org/junit5/)
+[![Hamcrest](https://img.shields.io/badge/Hamcrest-assertions-6E7781)](https://hamcrest.org/)
+[![JSON Schema](https://img.shields.io/badge/JSON%20Schema-contracts-5A29E4)](https://json-schema.org/)
+[![WireMock](https://img.shields.io/badge/WireMock-3.0.1-2F80ED)](https://wiremock.org/)
+[![Testcontainers](https://img.shields.io/badge/Testcontainers-1.19-2496ED)](https://testcontainers.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-42.7%20driver-4169E1)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/Docker-integration%20runtime-2496ED)](https://www.docker.com/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF)](https://github.com/features/actions)
+[![Trivy](https://img.shields.io/badge/Trivy-security%20scan-1904DA)](https://trivy.dev/)
+[![License](https://img.shields.io/badge/License-MIT-2EA44F)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781)](.github/SECURITY.md)
+
 A Java API and persistence quality-engineering framework using **REST Assured**, **JUnit 5**, **Hamcrest**, **JSON Schema**, **WireMock**, **Testcontainers**, PostgreSQL, and Maven lifecycle separation. Shared request specifications enforce validated runtime configuration, transport budgets, run correlation, and request-level diagnostics while tests retain normal REST Assured responses and assertions.
 
 > [!IMPORTANT]
