@@ -1,6 +1,7 @@
 package com.example.framework;
 
 import java.net.URI;
+import java.util.Objects;
 import java.util.UUID;
 
 public record TestConfig(
@@ -8,6 +9,20 @@ public record TestConfig(
         int connectTimeoutMs,
         int readTimeoutMs,
         String runId) {
+
+    public TestConfig {
+        baseUri = validateHttpBaseUri(baseUri);
+        if (connectTimeoutMs <= 0) {
+            throw new IllegalArgumentException("connectTimeoutMs must be positive");
+        }
+        if (readTimeoutMs <= 0) {
+            throw new IllegalArgumentException("readTimeoutMs must be positive");
+        }
+        if (runId == null || runId.isBlank()) {
+            throw new IllegalArgumentException("runId must not be blank");
+        }
+        runId = runId.trim();
+    }
 
     public static TestConfig fromEnvironment() {
         return new TestConfig(
@@ -19,14 +34,25 @@ public record TestConfig(
 
     private static URI absoluteHttpUri(String name, String fallback) {
         var raw = valueOrDefault(name, fallback).replaceAll("/+$", "");
-        URI uri;
         try {
-            uri = URI.create(raw);
+            return URI.create(raw);
         } catch (IllegalArgumentException error) {
             throw new IllegalStateException(name + " must be an absolute http(s) URI", error);
         }
-        if (!uri.isAbsolute() || !("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))) {
-            throw new IllegalStateException(name + " must be an absolute http(s) URI");
+    }
+
+    private static URI validateHttpBaseUri(URI uri) {
+        Objects.requireNonNull(uri, "baseUri must not be null");
+        var isHttp = "http".equalsIgnoreCase(uri.getScheme()) ||
+                "https".equalsIgnoreCase(uri.getScheme());
+        if (!uri.isAbsolute() || !isHttp || uri.getHost() == null) {
+            throw new IllegalArgumentException("baseUri must be an absolute http(s) URI with a hostname");
+        }
+        if (uri.getUserInfo() != null) {
+            throw new IllegalArgumentException("baseUri must not contain URL credentials");
+        }
+        if (uri.getQuery() != null || uri.getFragment() != null) {
+            throw new IllegalArgumentException("baseUri must not contain a query string or fragment");
         }
         return uri;
     }
