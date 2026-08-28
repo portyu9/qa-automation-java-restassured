@@ -4,20 +4,17 @@
 [![Extended](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/extended.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/extended.yml)
 [![Security](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/security.yml/badge.svg)](https://github.com/portyu9/qa-automation-java-restassured/actions/workflows/security.yml)
 
-[![Java](https://img.shields.io/badge/Java-17%20%7C%2021-ED8B00)](https://www.java.com/)
-[![Maven](https://img.shields.io/badge/Maven-3.9%2B-C71A36)](https://maven.apache.org/)
-[![REST Assured](https://img.shields.io/badge/REST%20Assured-6.0.1-6E7781)](https://rest-assured.io/)
-[![JUnit](https://img.shields.io/badge/JUnit-5.10-25A162)](https://junit.org/junit5/)
-[![Hamcrest](https://img.shields.io/badge/Hamcrest-assertions-6E7781)](https://hamcrest.org/)
-[![JSON Schema](https://img.shields.io/badge/JSON%20Schema-contracts-5A29E4)](https://json-schema.org/)
-[![WireMock](https://img.shields.io/badge/WireMock-3.0.1-2F80ED)](https://wiremock.org/)
-[![Testcontainers](https://img.shields.io/badge/Testcontainers-1.19-2496ED)](https://testcontainers.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-42.7%20driver-4169E1)](https://www.postgresql.org/)
-[![Docker](https://img.shields.io/badge/Docker-integration%20runtime-2496ED)](https://www.docker.com/)
-[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF)](https://github.com/features/actions)
-[![Trivy](https://img.shields.io/badge/Trivy-security%20scan-1904DA)](https://trivy.dev/)
-[![License](https://img.shields.io/badge/License-MIT-2EA44F)](LICENSE)
-[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781)](.github/SECURITY.md)
+[![Java](https://img.shields.io/badge/Java-runtime-ED8B00?logo=openjdk&logoColor=white)](https://www.java.com/)
+[![Maven](https://img.shields.io/badge/Maven-build-C71A36?logo=apachemaven&logoColor=white)](https://maven.apache.org/)
+[![REST Assured](https://img.shields.io/badge/REST%20Assured-API%20testing-6E7781)](https://rest-assured.io/)
+[![JUnit](https://img.shields.io/badge/JUnit-testing-25A162?logo=junit5&logoColor=white)](https://junit.org/junit5/)
+[![WireMock](https://img.shields.io/badge/WireMock-HTTP%20contracts-2F80ED)](https://wiremock.org/)
+[![Testcontainers](https://img.shields.io/badge/Testcontainers-integration-2496ED)](https://testcontainers.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-persistence-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-CI-2088FF?logo=githubactions&logoColor=white)](https://github.com/features/actions)
+[![Trivy](https://img.shields.io/badge/Trivy-security-1904DA?logo=trivy&logoColor=white)](https://trivy.dev/)
+[![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-6E7781?logo=github&logoColor=white)](.github/SECURITY.md)
 
 A Java API and persistence quality-engineering framework using **REST Assured**, **JUnit 5**, **Hamcrest**, **JSON Schema**, **WireMock**, **Testcontainers**, PostgreSQL, and Maven lifecycle separation. Shared request specifications enforce validated runtime configuration, transport budgets, run correlation, and request-level diagnostics while tests retain normal REST Assured responses and assertions.
 
@@ -48,6 +45,14 @@ flowchart TD
     CLIENT --> WM
     DB[PostgresIntegrationTest] --> TC[Testcontainers]
     TC --> PG[(PostgreSQL)]
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
+    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
+    class J,LOCAL,DB entry;
+    class CLIENT,SPEC,CFG,FILTER,RA,WM,TC core;
+    class API,PG evidence;
+    linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
 ## Engineering invariants
@@ -273,6 +278,18 @@ flowchart TD
     EXT --> FULL21[Full verify · Java 21]
     FULL17 --> EV[Surefire + Failsafe + observability]
     FULL21 --> EV
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
+    classDef gate fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
+    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
+    classDef security fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
+    class PR,CODECHANGE entry;
+    class J17,J21 core;
+    class FULL17,EXT,FULL21 gate;
+    class SEC security;
+    class EV evidence;
+    linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
 ## Failure triage
