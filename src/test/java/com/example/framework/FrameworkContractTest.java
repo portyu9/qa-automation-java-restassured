@@ -2,6 +2,8 @@ package com.example.framework;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class FrameworkContractTest {
@@ -18,12 +20,41 @@ class FrameworkContractTest {
     @Test
     void explicitConfigurationCanTargetAnAuthorizedStub() {
         var config = new TestConfig(
-                java.net.URI.create("http://localhost:8089"),
+                URI.create("http://localhost:8089"),
                 1_000,
                 2_000,
                 "framework-contract");
 
         var spec = ApiSpecs.request(config);
         assertNotNull(spec);
+    }
+
+    @Test
+    void configurationRejectsUnsafeUrlsAndInvalidBudgets() {
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://user:password@example.test/api"),
+                1_000,
+                2_000,
+                "run"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test/api?access_token=secret"),
+                1_000,
+                2_000,
+                "run"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test/api#fragment"),
+                1_000,
+                2_000,
+                "run"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test"),
+                0,
+                2_000,
+                "run"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test"),
+                1_000,
+                2_000,
+                "  "));
     }
 }
