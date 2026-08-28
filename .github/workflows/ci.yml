@@ -36,12 +36,34 @@ jobs:
       - name: Full verification including integration tests
         if: matrix.java == 17
         run: mvn -B -ntp verify
+      - name: Publish CI observability summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p reports
+          jq -n \
+            --arg runId "$TEST_RUN_ID" \
+            --arg status "$JOB_STATUS" \
+            --arg sha "$GITHUB_SHA" \
+            --arg ref "$GITHUB_REF" \
+            --arg java "${{ matrix.java }}" \
+            '{schemaVersion:1,framework:"restassured-junit",runId:$runId,dimension:{java:$java},status:$status,sha:$sha,ref:$ref}' \
+            > "reports/ci-observability-java-${{ matrix.java }}.json"
+          {
+            echo "### REST Assured / JUnit · Java ${{ matrix.java }}"
+            echo
+            echo "- Run ID: \`${TEST_RUN_ID}\`"
+            echo "- Job status: \`${JOB_STATUS}\`"
+            echo '- Evidence: Surefire/Failsafe reports + request correlation diagnostics + CI observability envelope'
+          } | tee "reports/ci-summary-java-${{ matrix.java }}.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Maven test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: restassured-java-${{ matrix.java }}-reports
           path: |
+            reports/
             target/surefire-reports/
             target/failsafe-reports/
           if-no-files-found: ignore
