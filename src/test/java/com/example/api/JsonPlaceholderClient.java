@@ -1,66 +1,52 @@
 package com.example.api;
 
+import com.example.framework.ApiSpecs;
+import com.example.framework.TestConfig;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 
 import static io.restassured.RestAssured.given;
 
-/**
- * Simple API client abstraction for JSONPlaceholder.  
- *
- * I created this class following a Page Object–style pattern so that my tests
- * interact with a single abstraction rather than directly invoking RestAssured.  
- * This makes the tests easier to read and maintain because all endpoint
- * configuration lives in one place.  
- */
 public class JsonPlaceholderClient {
-    private final String baseUrl;
+    private final RequestSpecification requestSpec;
 
-    /**
-     * Construct a client pointing at the default JSONPlaceholder base URL.
-     */
     public JsonPlaceholderClient() {
-        this("https://jsonplaceholder.typicode.com");
+        this(TestConfig.fromEnvironment());
     }
 
-    /**
-     * Construct a client with a custom base URL.  
-     * Useful when pointing to a stub or mock server.
-     *
-     * @param baseUrl base URL of the JSONPlaceholder API
-     */
     public JsonPlaceholderClient(String baseUrl) {
-        this.baseUrl = baseUrl;
+        this(new TestConfig(
+                java.net.URI.create(baseUrl),
+                5_000,
+                15_000,
+                java.util.UUID.randomUUID().toString()));
     }
 
-    /**
-     * Retrieve all posts.
-     *
-     * @return the HTTP response
-     */
+    public JsonPlaceholderClient(TestConfig config) {
+        this.requestSpec = ApiSpecs.request(config);
+    }
+
     public Response getPosts() {
         return given()
-                .baseUri(baseUrl)
+                .spec(requestSpec)
                 .when()
                 .get("/posts")
                 .then()
-                .extract()
-                .response();
+                .spec(ApiSpecs.jsonResponse())
+                .log().ifValidationFails()
+                .extract().response();
     }
 
-    /**
-     * Retrieve a single post by ID.
-     *
-     * @param id post identifier
-     * @return the HTTP response
-     */
     public Response getPost(int id) {
+        if (id <= 0) throw new IllegalArgumentException("id must be positive");
         return given()
-                .baseUri(baseUrl)
+                .spec(requestSpec)
                 .pathParam("id", id)
                 .when()
                 .get("/posts/{id}")
                 .then()
-                .extract()
-                .response();
+                .spec(ApiSpecs.jsonResponse())
+                .log().ifValidationFails()
+                .extract().response();
     }
 }

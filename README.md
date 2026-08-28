@@ -1,44 +1,97 @@
-# QA Automation: Java RestAssured Sample
+# Java / REST Assured API Test Framework
 
-I created this repository to demonstrate a production‑grade API and database test automation framework in Java. This project uses modern libraries such as **RestAssured** for HTTP assertions, **Testcontainers** for spinning up disposable PostgreSQL databases during integration tests, and **WireMock** for mocking external services. The test suite targets a real public API (JSONPlaceholder) and includes examples of contract validation, service‑layer tests and data persistence checks with GitHub Actions CI.
+A Java 17+ API automation framework using REST Assured, JUnit 5, JSON Schema validation, WireMock, Testcontainers, and Maven lifecycle separation for fast and infrastructure-backed tests.
 
-## Features
+## Technology baseline
 
-- **API tests with RestAssured and JUnit 5.** I wrote concise and expressive tests against live endpoints.
-- **Contract validation using JSON Schema.** Each response is checked against a schema located in `src/test/resources`.
-- **Integration tests using Testcontainers** to start a temporary PostgreSQL database. I use JDBC to verify data persistence.
-- **Mocking of external dependencies with WireMock.** The framework can be extended to simulate third‑party services.
-- **Clean project structure** following a Page Object–style abstraction for service endpoints.
-- **Extensible test data management** to keep fixtures and schemas organized.
-- **Continuous integration configuration via GitHub Actions.** Tests run automatically on every push or pull request.
+- Java 17 minimum;
+- REST Assured 6.0.1;
+- JUnit Jupiter;
+- JSON Schema Validator;
+- WireMock for controlled external dependencies;
+- Testcontainers/PostgreSQL for disposable integration infrastructure;
+- Surefire for `*Test` and Failsafe for `*IntegrationTest`.
 
-## Getting Started
+## Structure
 
-### Prerequisites
-
-- Java 17 or later.
-- Maven 3.9+.
-
-### Running the Tests
-
-I can run the entire test suite locally with:
-
-```bash
-mvn test
+```text
+.
+├── src/test/java/com/example/
+│   ├── api/
+│   ├── db/
+│   └── framework/
+│       ├── TestConfig.java
+│       └── ApiSpecs.java
+├── src/test/resources/
+│   └── post-schema.json
+├── docs/
+├── pom.xml
+└── .github/workflows/ci.yml
 ```
 
-Maven will download all dependencies, start a containerised PostgreSQL database for the integration tests, run WireMock for the mocked endpoints, and execute the JUnit tests.
+## Configuration
 
-### Project Structure
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `TEST_BASE_URL` | API target | JSONPlaceholder |
+| `TEST_CONNECT_TIMEOUT_MS` | connection timeout | `5000` |
+| `TEST_READ_TIMEOUT_MS` | response read timeout | `15000` |
+| `TEST_RUN_ID` | request/run correlation | generated UUID |
 
-- `src/test/java/com/example/api` – API tests and abstractions.
-- `src/test/java/com/example/db` – Database integration tests.
-- `.github/workflows/ci.yml` – GitHub Actions workflow to run tests in CI.
+Configuration is converted into immutable `TestConfig` state before requests are created. `.env.example` is documentation; inject environment values through the shell or CI.
 
-## About the Public API
+## Commands
 
-The API tests target [JSONPlaceholder](https://jsonplaceholder.typicode.com/), a free REST API for prototyping and testing. I selected it because it is stable and freely available.
+Fast tests only:
 
-## Continuous Integration
+```bash
+mvn -Pfast test
+```
 
-GitHub Actions will automatically run on every push and pull request. The workflow sets up the correct Java version, caches Maven dependencies and runs `mvn test`. Failing tests will mark the build as failed.
+Full Maven verification including `*IntegrationTest` through Failsafe:
+
+```bash
+mvn verify
+```
+
+Single API test:
+
+```bash
+mvn -Dtest=PostApiTest test
+```
+
+## Request/response specification policy
+
+`ApiSpecs.request()` centralizes base URI, explicit connection/read timeouts, accepted content type, and run correlation. `ApiSpecs.jsonResponse()` contains only cross-endpoint response invariants.
+
+Endpoint-specific status codes and domain values stay in tests. Avoid hiding entire requests behind generic wrappers; domain clients such as `JsonPlaceholderClient` should expose meaningful service operations.
+
+## REST Assured logging
+
+Response logging is enabled only when validation fails. In authenticated systems, add filters that redact `Authorization`, cookies, API keys, passwords, and sensitive payload fields before enabling request logging.
+
+## Mocks and contracts
+
+WireMock is appropriate for injecting timeouts, malformed responses, 4xx/5xx behavior, and deterministic provider cases. A mock should verify the outgoing request contract and should not replace every real integration path.
+
+JSON Schema assertions protect response structure. They complement, rather than replace, behavioral assertions and provider compatibility checks.
+
+## Database integration
+
+Classes ending in `IntegrationTest` execute in Maven Failsafe during `verify`. Testcontainers provides disposable PostgreSQL infrastructure so integration state is isolated from developer/shared databases.
+
+## CI
+
+GitHub Actions runs the fast gate on Java 17 and 21, executes full integration verification on Java 17, caches Maven dependencies, and retains Surefire/Failsafe reports on failure. Maven Enforcer rejects unsupported Java/Maven runtimes before tests start.
+
+## Extension rules
+
+- add target configuration through `TestConfig` with validation;
+- put transport invariants in specs, domain behavior in tests;
+- give all network calls bounded timeouts;
+- prefer unique, disposable test data;
+- keep mocks at external boundaries;
+- separate integration tests through naming/lifecycle, not comments;
+- capture correlation IDs and safe diagnostics for CI triage.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) for design and governance details.
