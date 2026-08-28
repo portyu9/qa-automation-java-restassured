@@ -10,39 +10,35 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 /**
- * End‑to‑end tests for the JSONPlaceholder posts resource.  
- *
- * I deliberately keep the assertions expressive and descriptive using
- * Hamcrest matchers. The schema file `post-schema.json` resides in
- * `src/test/resources` and is automatically resolved from the classpath.
+ * End-to-end API contracts for the configured posts service. Assertions combine
+ * protocol behavior, semantic values, and version-controlled JSON Schemas.
  */
-@DisplayName("JSONPlaceholder API Tests")
+@DisplayName("Posts API contracts")
 public class PostApiTest {
-
     private final JsonPlaceholderClient client = new JsonPlaceholderClient();
 
     @Test
-    @DisplayName("Verify /posts returns a list of posts with expected structure")
+    @DisplayName("List posts with the expected protocol and resource schema")
     void shouldReturnListOfPosts() {
         Response response = client.getPosts();
 
-        // Basic status and header assertions
         response.then()
                 .statusCode(200)
                 .contentType(ContentType.JSON)
                 .body("size()", greaterThan(0))
-                .body("[0].id", notNullValue())
-                .body("[0].userId", notNullValue())
-                .body("[0].title", notNullValue())
-                .body("[0].body", notNullValue());
+                .body("[0].id", greaterThan(0))
+                .body("[0].userId", greaterThan(0))
+                .body("[0].title", not(emptyOrNullString()))
+                .body("[0].body", not(emptyOrNullString()));
 
-        // Validate the JSON schema located in src/test/resources/post-schema.json
-        assertThat("Response should match the posts schema",
-                response.getBody().asString(), matchesJsonSchemaInClasspath("post-schema.json"));
+        assertThat(
+                "posts response should match the collection schema",
+                response.getBody().asString(),
+                matchesJsonSchemaInClasspath("post-schema.json"));
     }
 
     @Test
-    @DisplayName("Verify a single post can be retrieved by ID")
+    @DisplayName("Retrieve one post by a validated identifier")
     void shouldReturnSinglePost() {
         int postId = 1;
         Response response = client.getPost(postId);
@@ -51,8 +47,13 @@ public class PostApiTest {
                 .statusCode(200)
                 .contentType(ContentType.JSON)
                 .body("id", equalTo(postId))
-                .body("userId", notNullValue())
-                .body("title", notNullValue())
-                .body("body", notNullValue());
+                .body("userId", greaterThan(0))
+                .body("title", not(emptyOrNullString()))
+                .body("body", not(emptyOrNullString()));
+
+        assertThat(
+                "single post response should match the resource schema",
+                response.getBody().asString(),
+                matchesJsonSchemaInClasspath("single-post-schema.json"));
     }
 }
