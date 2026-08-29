@@ -4,12 +4,15 @@ import java.net.URI;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 public record TestConfig(
         URI baseUri,
         int connectTimeoutMs,
         int readTimeoutMs,
         String runId) {
+
+    private static final Pattern SAFE_RUN_ID = Pattern.compile("^[A-Za-z0-9._:-]{1,128}$");
 
     public TestConfig {
         baseUri = validateHttpBaseUri(baseUri);
@@ -19,10 +22,7 @@ public record TestConfig(
         if (readTimeoutMs <= 0) {
             throw new IllegalArgumentException("readTimeoutMs must be positive");
         }
-        if (runId == null || runId.isBlank()) {
-            throw new IllegalArgumentException("runId must not be blank");
-        }
-        runId = runId.trim();
+        runId = validateRunId(runId);
     }
 
     /**
@@ -62,6 +62,9 @@ public record TestConfig(
         if (!uri.isAbsolute() || !isHttp || uri.getHost() == null) {
             throw new IllegalArgumentException("baseUri must be an absolute http(s) URI with a hostname");
         }
+        if (uri.getPort() > 65_535) {
+            throw new IllegalArgumentException("baseUri port must be between 1 and 65535");
+        }
         if (uri.getUserInfo() != null) {
             throw new IllegalArgumentException("baseUri must not contain URL credentials");
         }
@@ -69,6 +72,18 @@ public record TestConfig(
             throw new IllegalArgumentException("baseUri must not contain a query string or fragment");
         }
         return uri;
+    }
+
+    private static String validateRunId(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("runId must not be blank");
+        }
+        var normalized = value.trim();
+        if (!SAFE_RUN_ID.matcher(normalized).matches()) {
+            throw new IllegalArgumentException(
+                    "runId must be 1-128 ASCII letters, digits, dots, underscores, colons, or hyphens");
+        }
+        return normalized;
     }
 
     private static int positiveInt(
