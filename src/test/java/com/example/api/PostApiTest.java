@@ -20,12 +20,12 @@ import static org.hamcrest.Matchers.*;
 @DisplayName("Posts API contracts")
 public class PostApiTest {
     private PostsApiFixture fixture;
-    private JsonPlaceholderClient client;
+    private PostsApiClient client;
 
     @BeforeEach
     void startFixture() {
         fixture = PostsApiFixture.withHappyPath();
-        client = new JsonPlaceholderClient(fixture.config("posts-api-contract"));
+        client = new PostsApiClient(fixture.config("posts-api-contract"));
     }
 
     @AfterEach

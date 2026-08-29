@@ -7,14 +7,22 @@ import io.restassured.specification.RequestSpecification;
 
 import static io.restassured.RestAssured.given;
 
-public class JsonPlaceholderClient {
+/**
+ * Domain-focused REST Assured client for the posts resource.
+ *
+ * <p>The client is deliberately independent of any public API provider. Its
+ * target is supplied through {@link TestConfig}, allowing required CI to use the
+ * repository-owned WireMock fixture while environment integration remains an
+ * explicit runtime choice.</p>
+ */
+public class PostsApiClient {
     private final RequestSpecification requestSpec;
 
-    public JsonPlaceholderClient() {
+    public PostsApiClient() {
         this(TestConfig.fromEnvironment());
     }
 
-    public JsonPlaceholderClient(String baseUrl) {
+    public PostsApiClient(String baseUrl) {
         this(new TestConfig(
                 java.net.URI.create(baseUrl),
                 5_000,
@@ -22,7 +30,7 @@ public class JsonPlaceholderClient {
                 java.util.UUID.randomUUID().toString()));
     }
 
-    public JsonPlaceholderClient(TestConfig config) {
+    public PostsApiClient(TestConfig config) {
         this.requestSpec = ApiSpecs.request(config);
     }
 

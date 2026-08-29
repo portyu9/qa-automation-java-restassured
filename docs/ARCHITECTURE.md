@@ -6,7 +6,7 @@ The framework keeps REST Assured fluent request/assertion APIs visible while cen
 
 ```mermaid
 flowchart LR
-    T[JUnit tests] --> C[JsonPlaceholderClient]
+    T[JUnit tests] --> C[PostsApiClient]
     C --> SPEC[ApiSpecs]
     SPEC --> CFG[TestConfig]
     SPEC --> F[RequestDiagnosticsFilter]
@@ -86,7 +86,7 @@ This is a privacy-first default. A test can add targeted domain evidence when re
 
 ## Client boundary
 
-`JsonPlaceholderClient` exposes domain-oriented operations such as list/get post. It applies the shared request specification and returns REST Assured responses for expressive test assertions.
+`PostsApiClient` exposes domain-oriented operations such as list/get post. It is provider-neutral: target ownership belongs to `TestConfig`, not to the client class name or implementation. The client applies the shared request specification and returns REST Assured responses for expressive test assertions.
 
 Its no-argument constructor is intentionally environment-driven and therefore suitable only when an external target has been explicitly configured. Deterministic tests inject `TestConfig` from `PostsApiFixture`.
 

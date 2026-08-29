@@ -28,8 +28,8 @@ class LocalHttpContractTest {
         if (fixture != null) fixture.close();
     }
 
-    private JsonPlaceholderClient client() {
-        return new JsonPlaceholderClient(fixture.config("wiremock-run"));
+    private PostsApiClient client() {
+        return new PostsApiClient(fixture.config("wiremock-run"));
     }
 
     @Test
