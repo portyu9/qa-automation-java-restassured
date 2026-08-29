@@ -41,7 +41,7 @@ A Java API and persistence quality-engineering framework using **REST Assured**,
 
 ```mermaid
 flowchart TD
-    J[JUnit tests] --> CLIENT[JsonPlaceholderClient]
+    J[JUnit tests] --> CLIENT[PostsApiClient]
     CLIENT --> SPEC[ApiSpecs]
     SPEC --> CFG[TestConfig]
     SPEC --> FILTER[RequestDiagnosticsFilter]
@@ -103,7 +103,7 @@ flowchart TD
 .
 ├── src/test/java/com/example/
 │   ├── api/
-│   │   ├── JsonPlaceholderClient.java
+│   │   ├── PostsApiClient.java
 │   │   ├── PostApiTest.java
 │   │   └── LocalHttpContractTest.java
 │   ├── db/PostgresIntegrationTest.java
@@ -202,7 +202,7 @@ The base URI must be absolute HTTP(S), have a hostname, and contain no URL crede
 
 `ApiSpecs.request(config)` composes validated base URI, `Accept: application/json`, `X-Test-Run-Id`, connect/socket timeouts, per-request correlation, and `RequestDiagnosticsFilter`. `ApiSpecs.jsonResponse()` provides the common JSON content-type expectation.
 
-The specification is policy—not a new HTTP language. Endpoint operations remain explicit in `JsonPlaceholderClient`, and tests still inspect native REST Assured `Response` objects.
+The specification is policy—not a new HTTP language. Endpoint operations remain explicit in the provider-neutral `PostsApiClient`, and tests still inspect native REST Assured `Response` objects.
 
 ## Correlation and diagnostics
 
@@ -246,7 +246,7 @@ Required fields and semantic minima are constrained while `additionalProperties:
 
 ## Deterministic HTTP boundary with WireMock
 
-`PostsApiFixture` owns a dynamic-port `WireMockServer` for the deterministic API surface. `PostApiTest` obtains a validated `TestConfig` from that fixture and then uses the normal `JsonPlaceholderClient`/REST Assured stack for list/item requests, schema validation, and semantic assertions.
+`PostsApiFixture` owns a dynamic-port `WireMockServer` for the deterministic API surface. `PostApiTest` obtains a validated `TestConfig` from that fixture and then uses the normal `PostsApiClient`/REST Assured stack for list/item requests, schema validation, and semantic assertions.
 
 `LocalHttpContractTest` reuses the same fixture boundary for transport-specific behavior. It proves that the client sends `Accept` compatible with `application/json`, the configured `X-Test-Run-Id`, and a generated UUID-shaped `X-Test-Request-Id`. Matching the Accept header by containment/regex rather than exact raw equality reflects real HTTP negotiation: clients may serialize an equivalent Accept list rather than one exact string.
 
