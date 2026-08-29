@@ -24,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TEST_BASE_URL: https://jsonplaceholder.typicode.com
       TEST_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}-java21
     steps:
       - uses: actions/checkout@v7
@@ -33,7 +32,7 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
-      - name: Run full Maven lifecycle with API, WireMock, and container integration coverage
+      - name: Run full Maven lifecycle with local API and container integration coverage
         run: mvn -B -ntp verify
       - name: Publish Java observability summary
         if: always()
@@ -43,7 +42,7 @@ jobs:
             echo '### REST Assured · Java 21 full verify'
             echo
             echo "- Run ID: \`${TEST_RUN_ID}\`"
-            echo '- Local HTTP boundary: WireMock'
+            echo '- API boundary: repository-owned dynamic-port WireMock fixtures'
             echo '- Persistence boundary: PostgreSQL Testcontainers'
             echo '- Lifecycle: Surefire + Failsafe'
             echo "- Job status: \`${{ job.status }}\`"
