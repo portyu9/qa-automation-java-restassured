@@ -2,7 +2,7 @@
 
 ## Design objective
 
-The framework keeps REST Assured fluent request/assertion APIs visible while centralizing shared request policy, validated runtime configuration, request correlation, schema artifacts, and integration-test lifecycle.
+The framework keeps REST Assured fluent request/assertion APIs visible while centralizing shared request policy, validated runtime configuration, request correlation, schema artifacts, deterministic HTTP fixture ownership, and integration-test lifecycle.
 
 ```mermaid
 flowchart LR
@@ -11,12 +11,25 @@ flowchart LR
     SPEC --> CFG[TestConfig]
     SPEC --> F[RequestDiagnosticsFilter]
     C --> RA[REST Assured]
-    RA --> API[Target API]
+    RA --> WM[Repository-owned WireMock fixture]
+    EXT[Explicit external integration] --> CFG
+    CFG --> API[Configured external API]
     T --> S[JSON Schemas]
-    DB[DB integration tests] --> TC[Testcontainers / database]
+    DB[DB integration tests] --> TC[Testcontainers]
+    TC --> PG[(PostgreSQL)]
 ```
 
 Framework code should add domain or cross-cutting policy, not wrap every REST Assured operation in a second generic API.
+
+## Deterministic HTTP target model
+
+Required Maven and GitHub Actions validation does not depend on a public API. `PostsApiFixture` owns a dynamic-port loopback `WireMockServer` and provides the `TestConfig` consumed by REST Assured acceptance tests.
+
+The fixture defines only the HTTP behavior required to prove the client/framework contract. REST Assured still performs real HTTP requests; JSON Schema and semantic assertions remain in the tests. WireMock supplies deterministic transport availability, not a substitute assertion engine.
+
+Dynamic ports avoid fixed-port contention across parallel jobs and local processes. Each test owns and closes its fixture explicitly.
+
+Environment-driven execution is a separate integration path. `TestConfig.fromEnvironment()` requires `TEST_BASE_URL`; there is no silent public fallback. A missing target is therefore a configuration error before transport rather than an accidental request to a third-party service.
 
 ## Configuration invariants
 
@@ -32,6 +45,8 @@ The base URI must:
 - retain optional path prefixes.
 
 Connect/read timeouts must be positive and run ID must be nonblank. Because constructor validation is universal, test code cannot bypass policy by manually instantiating `TestConfig`.
+
+The environment loader accepts a read-only lookup function for contract tests. This allows missing/invalid external-target behavior to be proved without mutating process-global environment state.
 
 ## Shared request policy
 
@@ -73,6 +88,8 @@ This is a privacy-first default. A test can add targeted domain evidence when re
 
 `JsonPlaceholderClient` exposes domain-oriented operations such as list/get post. It applies the shared request specification and returns REST Assured responses for expressive test assertions.
 
+Its no-argument constructor is intentionally environment-driven and therefore suitable only when an external target has been explicitly configured. Deterministic tests inject `TestConfig` from `PostsApiFixture`.
+
 Input validation that belongs to the client operation—such as positive resource IDs—happens before sending a request.
 
 ## Schema ownership
@@ -87,24 +104,37 @@ Surefire owns fast `*Test` execution and excludes `*IntegrationTest`. Failsafe o
 
 This creates a predictable split:
 
-- `mvn test` / fast profile → framework/API fast tests;
-- `mvn verify` → full lifecycle including integrations.
+- `mvn test` / fast profile → framework/API/WireMock fast tests;
+- `mvn verify` → full lifecycle including PostgreSQL integration.
 
-Maven Enforcer establishes Java/Maven runtime floors before test execution.
+Maven Enforcer establishes Java/Maven runtime floors before test execution. CI jobs are additionally bounded by GitHub Actions timeouts so a stuck browser/container/network dependency cannot consume runner capacity indefinitely.
 
 ## Database integration
 
-Database integration tests use isolated containerized infrastructure where configured. Container lifecycle belongs to the integration layer, not shared API unit tests. Integration failures should be distinguishable from REST/API assertion failures through Maven's Surefire/Failsafe reports.
+Database integration tests use isolated Testcontainers PostgreSQL infrastructure where real dialect, schema, transaction, or JDBC behavior is material. Container lifecycle belongs to the integration layer, not shared API fast tests. Integration failures remain distinguishable from REST/API assertion failures through Maven's Surefire/Failsafe reports.
+
+## Failure-domain separation
+
+| Failure | First owner |
+| --- | --- |
+| Missing/unsafe `TEST_BASE_URL` during external integration | Configuration |
+| WireMock startup/stub mismatch | Deterministic HTTP fixture |
+| REST Assured transport/filter failure | HTTP framework boundary |
+| Status/schema/semantic mismatch | API contract |
+| PostgreSQL container/runtime failure | Integration infrastructure |
+| SQL/transaction assertion | Persistence contract |
 
 ## Extension rules
 
 New framework behavior should:
 
-1. place invariants in constructors/configuration boundaries when all callers must obey them;
-2. keep shared request policy in `ApiSpecs`;
-3. use REST Assured filters only for genuine cross-cutting behavior;
-4. keep automatic diagnostics structural and payload-safe;
-5. store schemas as version-controlled test resources;
-6. pair schemas with semantic assertions;
-7. preserve Surefire/Failsafe separation;
-8. add framework-contract tests for new configuration/policy invariants.
+1. keep required CI on repository-owned deterministic targets;
+2. place invariants in constructors/configuration boundaries when all callers must obey them;
+3. keep shared request policy in `ApiSpecs`;
+4. use REST Assured filters only for genuine cross-cutting behavior;
+5. keep automatic diagnostics structural and payload-safe;
+6. store schemas as version-controlled test resources;
+7. pair schemas with semantic assertions;
+8. preserve Surefire/Failsafe separation;
+9. require explicit configuration for external API integration;
+10. add framework-contract tests for new configuration/policy invariants.
