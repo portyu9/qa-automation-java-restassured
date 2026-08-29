@@ -1,7 +1,10 @@
 package com.example.api;
 
+import com.example.testing.PostsApiFixture;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -10,12 +13,25 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 /**
- * End-to-end API contracts for the configured posts service. Assertions combine
- * protocol behavior, semantic values, and version-controlled JSON Schemas.
+ * End-to-end HTTP contracts for the posts client against a repository-owned
+ * WireMock service. Assertions combine protocol behavior, semantic values, and
+ * version-controlled JSON Schemas without coupling required CI to a public API.
  */
 @DisplayName("Posts API contracts")
 public class PostApiTest {
-    private final JsonPlaceholderClient client = new JsonPlaceholderClient();
+    private PostsApiFixture fixture;
+    private JsonPlaceholderClient client;
+
+    @BeforeEach
+    void startFixture() {
+        fixture = PostsApiFixture.withHappyPath();
+        client = new JsonPlaceholderClient(fixture.config("posts-api-contract"));
+    }
+
+    @AfterEach
+    void stopFixture() {
+        if (fixture != null) fixture.close();
+    }
 
     @Test
     @DisplayName("List posts with the expected protocol and resource schema")
@@ -25,11 +41,11 @@ public class PostApiTest {
         response.then()
                 .statusCode(200)
                 .contentType(ContentType.JSON)
-                .body("size()", greaterThan(0))
-                .body("[0].id", greaterThan(0))
-                .body("[0].userId", greaterThan(0))
-                .body("[0].title", not(emptyOrNullString()))
-                .body("[0].body", not(emptyOrNullString()));
+                .body("size()", equalTo(2))
+                .body("[0].id", equalTo(1))
+                .body("[0].userId", equalTo(1))
+                .body("[0].title", equalTo("fixture-post-1"))
+                .body("[0].body", equalTo("deterministic local fixture"));
 
         assertThat(
                 "posts response should match the collection schema",
@@ -47,9 +63,9 @@ public class PostApiTest {
                 .statusCode(200)
                 .contentType(ContentType.JSON)
                 .body("id", equalTo(postId))
-                .body("userId", greaterThan(0))
-                .body("title", not(emptyOrNullString()))
-                .body("body", not(emptyOrNullString()));
+                .body("userId", equalTo(1))
+                .body("title", equalTo("fixture-post-1"))
+                .body("body", equalTo("deterministic local fixture"));
 
         assertThat(
                 "single post response should match the resource schema",

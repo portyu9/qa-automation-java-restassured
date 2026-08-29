@@ -3,6 +3,7 @@ package com.example.framework;
 import java.net.URI;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
 
 public record TestConfig(
         URI baseUri,
@@ -24,20 +25,33 @@ public record TestConfig(
         runId = runId.trim();
     }
 
+    /**
+     * Load an explicitly configured deployed/integration target.
+     * Deterministic framework tests inject a TestConfig instead of depending on
+     * process environment or a public fallback.
+     */
     public static TestConfig fromEnvironment() {
-        return new TestConfig(
-                absoluteHttpUri("TEST_BASE_URL", "https://jsonplaceholder.typicode.com"),
-                positiveInt("TEST_CONNECT_TIMEOUT_MS", 5_000),
-                positiveInt("TEST_READ_TIMEOUT_MS", 15_000),
-                valueOrDefault("TEST_RUN_ID", UUID.randomUUID().toString()));
+        return fromEnvironment(System::getenv);
     }
 
-    private static URI absoluteHttpUri(String name, String fallback) {
-        var raw = valueOrDefault(name, fallback).replaceAll("/+$", "");
+    static TestConfig fromEnvironment(Function<String, String> readVariable) {
+        Objects.requireNonNull(readVariable, "readVariable must not be null");
+        return new TestConfig(
+                requiredHttpUri(readVariable, "TEST_BASE_URL"),
+                positiveInt(readVariable, "TEST_CONNECT_TIMEOUT_MS", 5_000),
+                positiveInt(readVariable, "TEST_READ_TIMEOUT_MS", 15_000),
+                valueOrDefault(readVariable, "TEST_RUN_ID", UUID.randomUUID().toString()));
+    }
+
+    private static URI requiredHttpUri(Function<String, String> readVariable, String name) {
+        var raw = readVariable.apply(name);
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalStateException(name + " is required for environment-driven API integration");
+        }
         try {
-            return URI.create(raw);
+            return validateHttpBaseUri(URI.create(raw.trim().replaceAll("/+$", "")));
         } catch (IllegalArgumentException error) {
-            throw new IllegalStateException(name + " must be an absolute http(s) URI", error);
+            throw new IllegalStateException(name + " must be a safe absolute http(s) URI", error);
         }
     }
 
@@ -57,8 +71,11 @@ public record TestConfig(
         return uri;
     }
 
-    private static int positiveInt(String name, int fallback) {
-        var raw = System.getenv(name);
+    private static int positiveInt(
+            Function<String, String> readVariable,
+            String name,
+            int fallback) {
+        var raw = readVariable.apply(name);
         if (raw == null || raw.isBlank()) return fallback;
         try {
             int value = Integer.parseInt(raw);
@@ -69,8 +86,11 @@ public record TestConfig(
         }
     }
 
-    private static String valueOrDefault(String name, String fallback) {
-        var raw = System.getenv(name);
+    private static String valueOrDefault(
+            Function<String, String> readVariable,
+            String name,
+            String fallback) {
+        var raw = readVariable.apply(name);
         return raw == null || raw.isBlank() ? fallback : raw.trim();
     }
 }

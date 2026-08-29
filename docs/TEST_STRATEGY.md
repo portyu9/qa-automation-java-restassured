@@ -2,29 +2,40 @@
 
 ## Purpose
 
-The suite separates fast API/framework contracts from environment-heavy integration tests while preserving expressive REST Assured assertions. Shared infrastructure is tested independently so configuration, schema, or diagnostics regressions do not require a live external failure to identify them.
+The suite separates fast API/framework contracts from environment-heavy persistence integration while preserving expressive REST Assured assertions. Required API validation runs against repository-owned WireMock fixtures so configuration, schema, diagnostics, and HTTP behavior remain attributable without public-service availability.
 
 ## Test layers
 
-| Layer | Maven lifecycle | External dependency | Primary concern |
+| Layer | Maven lifecycle | Target/dependency | Primary concern |
 | --- | --- | --- | --- |
-| Framework contract | Surefire `test` | No | Configuration invariants and shared specs |
-| API behavior | Surefire `test` | HTTP target | Status, protocol, schema, semantics |
-| Database integration | Failsafe `verify` | Containerized DB | Persistence/integration behavior |
+| Framework contract | Surefire `test` | No network | Configuration invariants and shared specs |
+| API behavior | Surefire `test` | Dynamic-port WireMock | Status, protocol, schema, semantics |
+| HTTP policy/error behavior | Surefire `test` | Dynamic-port WireMock | Headers, correlation, error visibility |
+| Database integration | Failsafe `verify` | Testcontainers PostgreSQL | Persistence/integration behavior |
+| External API integration | Explicit/manual | Configured `TEST_BASE_URL` | Environment/provider behavior |
 
-Fast CI runs on Java 17 and 21. Full `mvn verify` integration coverage runs on the designated baseline runtime so Surefire/Failsafe ownership remains clear.
+Fast CI runs on Java 17 and 21. Full `mvn verify` runs on Java 17 in primary CI and Java 21 in extended CI, keeping Surefire/Failsafe ownership clear while covering the supported runtime range.
+
+## Deterministic API target policy
+
+Required CI must not contact a public demonstration API. `PostsApiFixture` starts WireMock on an ephemeral loopback port and injects a validated `TestConfig` into `JsonPlaceholderClient`.
+
+This preserves a real HTTP boundary: REST Assured still serializes requests, applies filters and timeouts, receives HTTP responses, and exposes native `Response` objects. Only service availability/data are repository-controlled.
+
+External-provider validation is intentionally separate. `TestConfig.fromEnvironment()` requires `TEST_BASE_URL`; no default host is inferred. Missing target configuration fails before transport.
 
 ## Configuration-negative testing
 
-`TestConfig` constructor invariants are tested directly, not only through environment parsing. Tests reject:
+`TestConfig` constructor invariants and environment parsing are tested independently. Tests reject:
 
+- missing environment-driven API target;
 - URL credentials;
 - query-bearing base URIs;
 - fragment-bearing base URIs;
 - non-positive timeout budgets;
 - blank run IDs.
 
-This matters because helper/client tests may construct `TestConfig` manually. Universal constructor validation prevents those code paths from bypassing production framework policy.
+The environment loader accepts an injected read-only lookup so negative tests do not mutate process-global environment state. Universal constructor validation prevents manually built configurations from bypassing policy.
 
 ## API assertion depth
 
@@ -36,13 +47,13 @@ API tests should combine the relevant layers of evidence:
 4. semantic values such as requested ID;
 5. domain-specific negative behavior where supported.
 
-A schema pass is not sufficient when the wrong resource can still satisfy the same shape.
+A schema pass is not sufficient when the wrong resource can still satisfy the same shape. Deterministic fixtures use exact synthetic values so semantic assertions are stable and meaningful.
 
 ## Schema strategy
 
 Keep list and item schemas distinct and version-controlled under `src/test/resources`. Required fields and basic types should match the contract actually asserted by tests.
 
-Schema changes require review like source changes. Do not silently loosen schemas merely to make a provider change pass.
+Schema changes require review like source changes. Do not silently loosen schemas merely to make a provider or fixture change pass.
 
 ## Correlation and diagnostics
 
@@ -50,36 +61,44 @@ Every shared request carries a run ID; the diagnostics filter generates a per-re
 
 Automatic logging deliberately excludes payloads, auth headers, cookies, and URLs. If a failure requires payload evidence, add a narrowly scoped assertion/log at the test/domain boundary using synthetic data rather than enabling global request/response dumps.
 
+WireMock request verification is used only when transport-visible behavior itself is the requirement—for example `Accept`, run correlation, generated request IDs, or error-status observability.
+
 ## Timeout and retry policy
 
-Connect/read timeouts are explicit configuration. The framework does not add blanket retries around REST Assured requests or assertions. A timeout should fail with enough correlation/timing context to classify the dependency rather than silently execute the operation again.
+Connect/read timeouts are explicit configuration. GitHub Actions jobs are also bounded so infrastructure hangs cannot consume runner capacity indefinitely.
+
+The framework does not add blanket retries around REST Assured requests or assertions. A timeout should fail with enough correlation/timing context to classify the dependency rather than silently execute the operation again.
 
 Mutating operations require an explicit idempotency contract before retry can be considered safe.
 
 ## Database integration policy
 
-Integration tests belong under the Failsafe naming/lifecycle convention. They should create isolated disposable state and rely on container lifecycle rather than shared developer services.
+Integration tests belong under the Failsafe naming/lifecycle convention. They should create isolated disposable state and rely on Testcontainers lifecycle rather than shared developer services.
 
 A database-container startup failure is an integration-infrastructure failure, not an API assertion failure; Surefire/Failsafe report separation helps preserve that classification.
 
 ## CI topology
 
-The CI matrix proves two distinct properties:
+The CI matrix proves distinct properties:
 
-- supported Java runtimes can compile and execute the fast test surface;
-- the baseline runtime can complete full `mvn verify`, including integrations.
+- Java 17 and 21 can compile and execute the deterministic fast API/framework surface;
+- Java 17 can complete the full primary `verify` lifecycle;
+- Java 21 can complete the full extended `verify` lifecycle;
+- neither API gate depends on public DNS, TLS, third-party data, rate limits, or uptime.
 
-JUnit/Surefire/Failsafe reports are retained for attribution. Maven Enforcer fails unsupported Java/Maven environments before tests begin.
+JUnit/Surefire/Failsafe reports are retained for attribution. CI observability identifies the API target class as `local-wiremock`. Maven Enforcer fails unsupported Java/Maven environments before tests begin.
 
 ## Failure classification
 
 | Failure class | First interpretation |
 | --- | --- |
 | Enforcer/build | Toolchain/dependency configuration |
-| Framework contract | Shared configuration/spec regression |
+| Framework configuration | Shared input/policy regression |
+| WireMock startup/stub verification | Repository-owned HTTP fixture |
 | HTTP status/schema/semantic assertion | API contract/behavior mismatch |
-| Request diagnostics transport error | Dependency/network failure context |
+| Request diagnostics transport error | REST Assured/HTTP transport context |
 | Failsafe/container | Integration environment/lifecycle |
+| External-target-only failure | Environment/provider integration |
 
 A broad `.log().all()` response dump should not be the default answer to ambiguity. Add the smallest evidence required to classify the failure.
 
@@ -88,9 +107,10 @@ A broad `.log().all()` response dump should not be the default answer to ambigui
 A Java API/framework change is ready when:
 
 - Maven Enforcer/build pass;
-- fast tests pass on the supported Java matrix;
-- constructor/configuration-negative contracts pass;
-- schema and semantic assertions pass;
-- full `mvn verify` passes when integration behavior is in scope;
+- fast tests pass on Java 17 and 21;
+- constructor and environment configuration-negative contracts pass;
+- deterministic WireMock HTTP/schema/semantic contracts pass;
+- full `mvn verify` passes on both covered Java generations when integration behavior is in scope;
+- required CI has no public API dependency;
 - automatic diagnostics remain payload-safe;
-- changes to shared request/lifecycle policy are documented and covered by framework tests.
+- changes to shared request/target/lifecycle policy are documented and covered by framework tests.
