@@ -20,18 +20,19 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A Java API and persistence quality-engineering framework using **REST Assured, JUnit 5, Hamcrest, JSON Schema, WireMock, Testcontainers, PostgreSQL, and Maven**. The design keeps protocol semantics, structural contracts, business semantics, persistence integration, runtime compatibility, and repository security as independently attributable verification planes.
+A Java API and persistence quality-engineering framework using **REST Assured, JUnit 5, Hamcrest, JSON Schema, WireMock, Testcontainers, PostgreSQL, and Maven**. The design keeps protocol semantics, structural contracts, business semantics, stateful HTTP behavior, persistence integration, runtime compatibility, and repository security as independently attributable verification planes.
 
 > [!IMPORTANT]
 > Required API CI is repository-owned. REST Assured exercises real HTTP behavior against dynamic-port WireMock fixtures; deployed APIs are explicit integration targets through `TEST_BASE_URL`, never a hidden prerequisite for framework correctness.
 
-**Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [Maven lifecycle](#maven-lifecycle-and-boundaries) · [API depth](#api-assertion-depth) · [PostgreSQL](#postgresql-integration-boundary) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
+**Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [Maven lifecycle](#maven-lifecycle-and-boundaries) · [API depth](#api-assertion-depth) · [protocol composition](#protocol-composition-state-and-telemetry) · [PostgreSQL](#postgresql-integration-boundary) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
 
 ## Capability map
 
 | Plane | What it proves | Boundary | Evidence |
 | --- | --- | --- | --- |
 | Fast API | Protocol + schema + semantic behavior | REST Assured + dynamic WireMock | Surefire reports |
+| Protocol composition | Path/query parameters, specs, extraction, cookies, bounded telemetry | Native REST Assured filters/specs | JUnit/Surefire |
 | HTTP contract | Shared headers/correlation/error visibility | WireMock dynamic port | JUnit/Surefire |
 | External API | Provider/environment behavior | Explicit `TEST_BASE_URL` | Intentional integration signal |
 | Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers PostgreSQL | Failsafe reports |
@@ -44,10 +45,16 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 ```mermaid
 flowchart TD
     J[JUnit tests] --> CLIENT[PostsApiClient]
+    J --> NATIVE[Native REST Assured capability contracts]
     CLIENT --> SPEC[ApiSpecs]
+    NATIVE --> SPEC
     SPEC --> CFG[TestConfig]
-    SPEC --> FILTER[RequestDiagnosticsFilter]
+    SPEC --> DIAG[RequestDiagnosticsFilter]
+    NATIVE --> TELE[ContractTelemetryFilter]
+    NATIVE --> COOKIE[CookieFilter]
     SPEC --> RA[REST Assured]
+    TELE --> RA
+    COOKIE --> RA
     RA --> WM[PostsApiFixture · WireMock]
     EXT[Explicit external integration] --> CFG
     DB[PostgresIntegrationTest] --> TC[Testcontainers]
@@ -57,7 +64,7 @@ flowchart TD
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
     class J,EXT,DB entry;
-    class CLIENT,SPEC,CFG,FILTER,RA,WM,TC core;
+    class CLIENT,NATIVE,SPEC,CFG,DIAG,TELE,COOKIE,RA,WM,TC core;
     class PG evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
@@ -69,8 +76,11 @@ flowchart TD
 | Required API target | Fast tests use repository-owned dynamic-port WireMock. |
 | External integration | `TestConfig.fromEnvironment()` requires explicit `TEST_BASE_URL`; no public fallback. |
 | Request policy | Base URI, JSON Accept, run ID, timeouts, and diagnostics are composed once in `ApiSpecs`. |
+| Native protocol surface | Query/path parameters, filters, response specs, extraction, cookies, and Hamcrest remain visible to tests. |
 | Correlation | Every request carries run and request identifiers. |
-| Diagnostics | Shared filters retain bounded metadata, not arbitrary bodies/credentials. |
+| Failure diagnostics | `RequestDiagnosticsFilter` emits bounded failure/transport metadata. |
+| Protocol telemetry | `ContractTelemetryFilter` records method, sanitized path, status, and duration without bodies/query/cookies/credentials. |
+| Stateful HTTP | REST Assured `CookieFilter` is scoped to scenarios that intentionally require cookie persistence. |
 | Assertion depth | Protocol, structure, semantics, and error behavior are independent contracts. |
 | HTTP simulation | WireMock is used where transport-visible behavior is material—not as a universal mock. |
 | Persistence | Testcontainers is used only when PostgreSQL semantics matter. |
@@ -83,9 +93,12 @@ flowchart TD
 | Requirement | Preferred boundary | Why |
 | --- | --- | --- |
 | Request/response protocol | REST Assured + WireMock | Real HTTP semantics |
+| Path/query/header/body composition | Native REST Assured request/response DSL | Preserve library semantics |
 | Response structure | JSON Schema | Version-controlled compatibility |
 | Business-critical values | Hamcrest/REST Assured assertions | Semantic correctness |
+| Stateful cookie/session behavior | Scoped `CookieFilter` | State is explicit and locally owned |
 | Header/correlation behavior | Local HTTP contract | Transport-visible policy |
+| Bounded request observations | `ContractTelemetryFilter` | Diagnostic evidence without payload retention |
 | SQL dialect/driver/transaction behavior | Testcontainers PostgreSQL | Real DB semantics matter |
 | Provider deployment behavior | Explicit external run | Environment remains separately attributable |
 
@@ -94,9 +107,9 @@ flowchart TD
 ```text
 .
 ├── src/test/java/com/example/
-│   ├── api/{PostsApiClient.java,PostApiTest.java,LocalHttpContractTest.java}
+│   ├── api/{PostsApiClient.java,PostApiTest.java,LocalHttpContractTest.java,RestAssuredCapabilitiesTest.java}
 │   ├── db/PostgresIntegrationTest.java
-│   ├── framework/{ApiSpecs.java,RequestDiagnosticsFilter.java,TestConfig.java,FrameworkContractTest.java}
+│   ├── framework/{ApiSpecs.java,RequestDiagnosticsFilter.java,ContractTelemetryFilter.java,TestConfig.java,FrameworkContractTest.java}
 │   └── testing/PostsApiFixture.java
 ├── src/test/resources/{post-schema.json,single-post-schema.json}
 ├── docs/{ARCHITECTURE.md,TEST_STRATEGY.md}
@@ -157,7 +170,7 @@ Do not replace first-class lifecycle ownership with ad-hoc shell filtering. A te
 
 ## Shared request policy
 
-`ApiSpecs.request(config)` composes validated URI, `Accept: application/json`, `X-Test-Run-Id`, request IDs, transport budgets, and diagnostics. Endpoint operations remain explicit in `PostsApiClient`; native REST Assured `Response` objects stay visible to tests.
+`ApiSpecs.request(config)` composes validated URI, `Accept: application/json`, `X-Test-Run-Id`, request IDs, transport budgets, and failure diagnostics. Endpoint operations remain explicit in `PostsApiClient`; native REST Assured `Response` objects stay visible to tests.
 
 The abstraction is policy—not a second HTTP language.
 
@@ -173,11 +186,26 @@ A meaningful API test can prove several independent dimensions:
 
 A schema-valid response can still represent the wrong resource. A `200` can still be semantically wrong. Treat these contracts as complementary, not interchangeable.
 
+## Protocol composition, state, and telemetry
+
+`RestAssuredCapabilitiesTest` demonstrates that framework policy composes with REST Assured rather than replacing it:
+
+- `queryParam()` and `pathParam()` build request identity through native request semantics;
+- shared request/response specifications remain reusable while endpoint-specific status/header/body assertions stay local;
+- `.extract().path(...)` retains native response extraction for downstream scenario logic;
+- `CookieFilter` carries intentionally scoped server state across related requests;
+- `ContractTelemetryFilter` records a concurrent-safe observation of method, URL **path only**, status, and elapsed milliseconds.
+
+`RequestDiagnosticsFilter` and `ContractTelemetryFilter` solve different problems. Diagnostics explain failed/transport requests; telemetry demonstrates bounded protocol observations. Neither retains request/response bodies, authorization values, query strings, or cookies.
+
+> [!IMPORTANT]
+> Shared filters are cross-cutting policy and therefore deserve stricter data-minimization rules than an individual test assertion. A test may inspect a response body to prove behavior without making that payload suitable for global logging.
+
 ## Deterministic HTTP boundary with WireMock
 
-`PostsApiFixture` owns a dynamic-port server. Tests execute the normal `PostsApiClient`/REST Assured path against that fixture and verify headers, correlation, JSON behavior, schemas, semantics, and visible error responses.
+`PostsApiFixture` owns a dynamic-port server. Tests execute the normal `PostsApiClient`/REST Assured path against that fixture and verify headers, correlation, JSON behavior, schemas, semantics, stateful protocol behavior, and visible error responses.
 
-WireMock stubs the **service boundary**, not REST Assured itself. This preserves serialization, header, status, and request-specification behavior while removing public-network availability from required CI.
+WireMock stubs the **service boundary**, not REST Assured itself. This preserves serialization, header, status, request-specification, filter, and extraction behavior while removing public-network availability from required CI.
 
 ## PostgreSQL integration boundary
 
@@ -190,7 +218,7 @@ WireMock stubs the **service boundary**, not REST Assured itself. This preserves
 
 Primary CI runs deterministic API/framework tests across Java 17/21 and full verification on the primary lifecycle. Extended CI adds a complete Java 21 lifecycle signal. Security and documentation gates remain independent.
 
-`RequestDiagnosticsFilter` emits bounded request metadata for failures and excludes bodies, authorization values, cookies, and full URLs from automatic shared diagnostics.
+Failure diagnostics and protocol telemetry are deliberately bounded. Bodies, authorization values, cookies, full URLs, and query strings are excluded from automatic shared evidence.
 
 ## Dependency maintenance
 
@@ -211,6 +239,9 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 | Enforcer/compile | Toolchain/build configuration |
 | WireMock startup | Local HTTP fixture lifecycle |
 | Protocol assertion | HTTP behavior |
+| Query/path/extraction mismatch | Request/response composition |
+| Cookie-state mismatch | Explicit stateful HTTP contract |
+| Telemetry mismatch | Filter observation/sanitization policy |
 | Schema failure | Structural compatibility |
 | Semantic failure | Wrong resource/business value |
 | Header/correlation failure | Shared request policy |
@@ -224,10 +255,11 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 
 - required CI against a public API;
 - wrapping REST Assured until native response semantics disappear;
+- global cookie/session filters shared across unrelated tests;
 - schema validation as the only correctness assertion;
 - static/shared ports for deterministic fixtures;
 - Testcontainers where database semantics are irrelevant;
-- arbitrary body/auth logging in shared filters;
+- arbitrary body/auth/query/cookie logging in shared filters;
 - mixing integration tests into the fast phase through shell filtering;
 - expanding retries to hide provider or infrastructure failures.
 
@@ -237,4 +269,4 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 - [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — assertion depth, test layers, compatibility, integration, and exit criteria.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — change-quality expectations.
 
-A strong REST Assured framework makes the failing boundary obvious: **build/runtime policy, HTTP protocol, schema, semantics, transport policy, persistence integration, compatibility, or explicit provider environment**.
+A strong REST Assured framework makes the failing boundary obvious: **build/runtime policy, HTTP protocol/composition/state, schema, semantics, transport policy, persistence integration, compatibility, or explicit provider environment**.
