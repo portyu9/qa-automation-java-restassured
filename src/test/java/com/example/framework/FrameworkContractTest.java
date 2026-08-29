@@ -3,18 +3,34 @@ package com.example.framework;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class FrameworkContractTest {
     @Test
-    void defaultConfigurationIsValid() {
-        var config = TestConfig.fromEnvironment();
+    void environmentConfigurationRequiresAnExplicitTarget() {
+        var variables = Map.of(
+                "TEST_BASE_URL", "https://api.example.test/v1/",
+                "TEST_CONNECT_TIMEOUT_MS", "1200",
+                "TEST_READ_TIMEOUT_MS", "3400",
+                "TEST_RUN_ID", "framework-contract");
 
-        assertTrue(config.baseUri().isAbsolute());
-        assertTrue(config.connectTimeoutMs() > 0);
-        assertTrue(config.readTimeoutMs() > 0);
-        assertFalse(config.runId().isBlank());
+        var config = TestConfig.fromEnvironment(variables::get);
+
+        assertEquals(URI.create("https://api.example.test/v1"), config.baseUri());
+        assertEquals(1_200, config.connectTimeoutMs());
+        assertEquals(3_400, config.readTimeoutMs());
+        assertEquals("framework-contract", config.runId());
+    }
+
+    @Test
+    void missingEnvironmentTargetFailsBeforeTransport() {
+        var error = assertThrows(
+                IllegalStateException.class,
+                () -> TestConfig.fromEnvironment(name -> null));
+
+        assertTrue(error.getMessage().contains("TEST_BASE_URL"));
     }
 
     @Test
@@ -56,5 +72,16 @@ class FrameworkContractTest {
                 1_000,
                 2_000,
                 "  "));
+    }
+
+    @Test
+    void environmentConfigurationRejectsUnsafeTargetsAndInvalidBudgets() {
+        var unsafeUrl = Map.of("TEST_BASE_URL", "https://user:password@example.test/api");
+        assertThrows(IllegalStateException.class, () -> TestConfig.fromEnvironment(unsafeUrl::get));
+
+        var invalidTimeout = Map.of(
+                "TEST_BASE_URL", "https://api.example.test",
+                "TEST_READ_TIMEOUT_MS", "0");
+        assertThrows(IllegalStateException.class, () -> TestConfig.fromEnvironment(invalidTimeout::get));
     }
 }
