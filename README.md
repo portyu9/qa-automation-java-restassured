@@ -20,24 +20,26 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A Java API and persistence quality-engineering framework using **REST Assured**, **JUnit 5**, **Hamcrest**, **JSON Schema**, **WireMock**, **Testcontainers**, PostgreSQL, and Maven lifecycle separation. Shared request specifications enforce validated runtime configuration, transport budgets, run correlation, and request-level diagnostics while tests retain normal REST Assured responses and assertions.
+A Java API and persistence quality-engineering framework using **REST Assured, JUnit 5, Hamcrest, JSON Schema, WireMock, Testcontainers, PostgreSQL, and Maven**. The design keeps protocol semantics, structural contracts, business semantics, persistence integration, runtime compatibility, and repository security as independently attributable verification planes.
 
 > [!IMPORTANT]
-> Required API CI is deterministic and repository-owned. REST Assured exercises real HTTP semantics against dynamic-port WireMock fixtures; public or deployed API targets are explicit integration choices through `TEST_BASE_URL`, not prerequisites for framework correctness.
+> Required API CI is repository-owned. REST Assured exercises real HTTP behavior against dynamic-port WireMock fixtures; deployed APIs are explicit integration targets through `TEST_BASE_URL`, never a hidden prerequisite for framework correctness.
+
+**Read by intent:** [capabilities](#capability-map) · [architecture](#architecture) · [Maven lifecycle](#maven-lifecycle-and-boundaries) · [API depth](#api-assertion-depth) · [PostgreSQL](#postgresql-integration-boundary) · [dependencies](#dependency-maintenance) · [triage](#failure-triage)
 
 ## Capability map
 
 | Plane | What it proves | Boundary | Evidence |
 | --- | --- | --- | --- |
-| Fast API | Protocol + schema + semantic behavior | REST Assured + dynamic-port WireMock | Surefire reports + request diagnostics |
-| Local HTTP contract | Shared headers/correlation + error-status behavior | WireMock dynamic port | JUnit/Surefire |
-| External API integration | Provider/environment behavior | Explicit `TEST_BASE_URL` | REST Assured/JUnit when intentionally invoked |
-| Persistence integration | PostgreSQL driver/schema/transaction behavior | Testcontainers PostgreSQL | Failsafe reports |
-| Compatibility | Java runtime compatibility | Java 17 + 21 | Matrix test reports |
-| Extended lifecycle | Full local API + PostgreSQL lifecycle on Java 21 | `mvn verify` | Surefire + Failsafe |
-| Security | Dependency/configuration exposure | Pinned Trivy filesystem scan | JSON findings + Markdown summary |
-| Documentation contract | README links, workflow badges, Mermaid declarations, governance surfaces, badge palette | Repository-local Python stdlib validation | Actions status |
-| Observability | Run/runtime/target identity | Structured CI envelope + request IDs | `reports/ci-observability-*.json`, Actions summary |
+| Fast API | Protocol + schema + semantic behavior | REST Assured + dynamic WireMock | Surefire reports |
+| HTTP contract | Shared headers/correlation/error visibility | WireMock dynamic port | JUnit/Surefire |
+| External API | Provider/environment behavior | Explicit `TEST_BASE_URL` | Intentional integration signal |
+| Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers PostgreSQL | Failsafe reports |
+| Compatibility | Runtime/toolchain compatibility | Java 17 + 21 | Matrix reports |
+| Security | Dependency/configuration exposure | Trivy filesystem scan | JSON + Markdown findings |
+| Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
+
+## Architecture
 
 ```mermaid
 flowchart TD
@@ -48,17 +50,15 @@ flowchart TD
     SPEC --> RA[REST Assured]
     RA --> WM[PostsApiFixture · WireMock]
     EXT[Explicit external integration] --> CFG
-    CFG --> API[Configured external API]
     DB[PostgresIntegrationTest] --> TC[Testcontainers]
     TC --> PG[(PostgreSQL)]
-    DOCS[README contract] --> GOVERN[Repository governance]
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    class J,EXT,DB,DOCS entry;
+    class J,EXT,DB entry;
     class CLIENT,SPEC,CFG,FILTER,RA,WM,TC core;
-    class API,PG,GOVERN evidence;
+    class PG evidence;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
@@ -66,128 +66,79 @@ flowchart TD
 
 | Concern | Framework contract |
 | --- | --- |
-| Required API target | Surefire API tests use repository-owned dynamic-port WireMock fixtures. |
-| External integration | Environment-driven execution requires explicit `TEST_BASE_URL`; no public fallback exists. |
-| Configuration | `TestConfig` validates base URI, timeout budgets, and run identity before requests. |
-| Request policy | Base URI, JSON Accept, run ID, transport budgets, and diagnostics are composed once in `ApiSpecs`. |
-| Correlation | Every request has `X-Test-Run-Id` plus a generated `X-Test-Request-Id`. |
-| Diagnostics | Shared filter logs method/status/duration/error class—not arbitrary bodies or credentials. |
-| Assertions | Protocol, structure, and semantics are complementary contracts. |
-| Local dependency simulation | `PostsApiFixture` owns WireMock lifecycle; dynamic ports avoid shared fixed-service coupling. |
-| Header contracts | WireMock accepts the real `Accept` header semantics rather than assuming an exact single media-type string. |
-| Persistence integration | Testcontainers is used when PostgreSQL semantics are material. |
-| Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest` verification. |
-| Compatibility | Java 17/21 fast validation; extended Java 21 full verification supplements Java 17 full CI. |
-| CI safety | Read-only permissions, concurrency cancellation, and bounded job time are enforced. |
-| Documentation | README-local references, workflow badges, Mermaid roots, governance files, and static badge-color uniqueness are executable contracts. |
+| Required API target | Fast tests use repository-owned dynamic-port WireMock. |
+| External integration | `TestConfig.fromEnvironment()` requires explicit `TEST_BASE_URL`; no public fallback. |
+| Request policy | Base URI, JSON Accept, run ID, timeouts, and diagnostics are composed once in `ApiSpecs`. |
+| Correlation | Every request carries run and request identifiers. |
+| Diagnostics | Shared filters retain bounded metadata, not arbitrary bodies/credentials. |
+| Assertion depth | Protocol, structure, semantics, and error behavior are independent contracts. |
+| HTTP simulation | WireMock is used where transport-visible behavior is material—not as a universal mock. |
+| Persistence | Testcontainers is used only when PostgreSQL semantics matter. |
+| Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest`. |
+| Compatibility | Java 17/21 fast validation plus full lifecycle coverage. |
+| CI safety | Read-only permissions, concurrency cancellation, bounded jobs. |
 
-## Tool ownership model
+## Boundary decision guide
 
-| Tool / technology | Native responsibility | Framework responsibility | Deliberately left visible |
-| --- | --- | --- | --- |
-| JUnit Jupiter | Test lifecycle, discovery, assertions/extensions | Test grouping and framework-contract placement | JUnit exception/test identity remains the primary test signal |
-| Maven | Dependency resolution, compilation and lifecycle orchestration | Enforcer policy, deterministic commands, Surefire/Failsafe separation | Maven/Enforcer/compile failures are not reclassified as API failures |
-| Surefire / Failsafe | Fast-test vs integration-test lifecycle execution | Naming conventions and CI topology | `*IntegrationTest` lifecycle ownership remains explicit |
-| REST Assured | HTTP request/response DSL, filters, response extraction | Shared request specification, client resource methods, bounded diagnostics | Native `Response`, status/content/JSON-path semantics remain visible |
-| Hamcrest | Semantic matcher expressions | Express business-critical field/value expectations separately from schema | Matcher failure stays an assertion signal rather than a transport failure |
-| JSON Schema validator | Structural response compatibility | Version-control distinct list/item schemas and combine shape with semantics | Schema validity is not treated as proof of correct resource values |
-| WireMock | Deterministic HTTP server/stubbing/request verification | Repository-owned API fixture, dynamic-port transport, header/correlation/error contracts | WireMock is not used as proof of external-provider availability |
-| Testcontainers | Container lifecycle and mapped connectivity | Real PostgreSQL integration boundary when DB semantics matter | Docker/runtime startup failures remain infrastructure signals |
-| PostgreSQL JDBC | Driver/database protocol and SQL semantics | Integration schema/query/transaction assertions | Real PostgreSQL behavior is not replaced by an in-memory approximation |
-| Trivy | Filesystem vulnerability and supported misconfiguration analysis | HIGH/CRITICAL remediation-oriented gate and retained findings | Configured `vuln,misconfig` scan is not generic credential/secret scanning |
-| GitHub Actions | Job/matrix scheduling and artifacts | Java compatibility, full lifecycle, security/docs separation and observability | Native job/process status remains authoritative |
+| Requirement | Preferred boundary | Why |
+| --- | --- | --- |
+| Request/response protocol | REST Assured + WireMock | Real HTTP semantics |
+| Response structure | JSON Schema | Version-controlled compatibility |
+| Business-critical values | Hamcrest/REST Assured assertions | Semantic correctness |
+| Header/correlation behavior | Local HTTP contract | Transport-visible policy |
+| SQL dialect/driver/transaction behavior | Testcontainers PostgreSQL | Real DB semantics matter |
+| Provider deployment behavior | Explicit external run | Environment remains separately attributable |
 
 ## Repository map
 
 ```text
 .
 ├── src/test/java/com/example/
-│   ├── api/
-│   │   ├── PostsApiClient.java
-│   │   ├── PostApiTest.java
-│   │   └── LocalHttpContractTest.java
+│   ├── api/{PostsApiClient.java,PostApiTest.java,LocalHttpContractTest.java}
 │   ├── db/PostgresIntegrationTest.java
-│   ├── framework/
-│   │   ├── ApiSpecs.java
-│   │   ├── RequestDiagnosticsFilter.java
-│   │   ├── TestConfig.java
-│   │   └── FrameworkContractTest.java
+│   ├── framework/{ApiSpecs.java,RequestDiagnosticsFilter.java,TestConfig.java,FrameworkContractTest.java}
 │   └── testing/PostsApiFixture.java
-├── src/test/resources/
-│   ├── post-schema.json
-│   └── single-post-schema.json
-├── docs/
-│   ├── ARCHITECTURE.md
-│   └── TEST_STRATEGY.md
-├── .github/
-│   ├── CODEOWNERS
-│   ├── SECURITY.md
-│   ├── pull_request_template.md
-│   ├── scripts/validate_readme.py
-│   └── workflows/
-│       ├── ci.yml
-│       ├── docs.yml
-│       ├── extended.yml
-│       └── security.yml
+├── src/test/resources/{post-schema.json,single-post-schema.json}
+├── docs/{ARCHITECTURE.md,TEST_STRATEGY.md}
+├── .github/workflows/{ci,docs,extended,security}.yml
 ├── CONTRIBUTING.md
 ├── .env.example
 └── pom.xml
 ```
 
-## Documentation contract
-
-`.github/workflows/docs.yml` validates deterministic repository-local facts on every pull request and `main`: local Markdown targets, workflow badge targets, Mermaid declarations, canonical `LICENSE`/`.github/SECURITY.md`, unique static Shields colors, and the GitHub-dark `#24292F` Security Policy badge. It deliberately does not convert external documentation-site uptime into a Java framework failure.
-
 ## Quick start
 
-Prerequisites:
-
-- Java 17+;
-- Maven 3.9+;
-- Docker-compatible runtime for integration verification.
-
-Fast deterministic gate:
+Prerequisites: Java 17+, Maven 3.9+, and a Docker-compatible runtime for PostgreSQL integration verification.
 
 ```bash
+# fast deterministic API gate
 mvn -B -ntp -Pfast test
-```
 
-Full lifecycle:
-
-```bash
+# complete Maven lifecycle
 mvn -B -ntp verify
-```
 
-Documentation contract:
-
-```bash
+# documentation contract
 python .github/scripts/validate_readme.py
 ```
 
-The Maven Enforcer plugin rejects unsupported Java/Maven versions before the test lifecycle proceeds. Normal Maven test commands do not require a public API target.
-
-Run an explicitly selected external API integration through the environment-driven client path only when intended:
+Explicit deployed API integration:
 
 ```bash
 TEST_BASE_URL=https://api.test.example.internal mvn -B -ntp test
 ```
 
 <details>
-<summary><strong>Lifecycle reference</strong></summary>
+<summary><strong>Maven lifecycle reference</strong></summary>
 
 | Invocation | Primary scope |
 | --- | --- |
-| `mvn -B -ntp -Pfast test` | Surefire deterministic API/framework/WireMock tests; skips integration verification. |
-| `mvn -B -ntp test` | Surefire fast tests. |
+| `mvn -B -ntp -Pfast test` | Deterministic Surefire API/framework/WireMock tests. |
+| `mvn -B -ntp test` | Standard Surefire fast tests. |
 | `mvn -B -ntp verify` | Surefire + Failsafe integration lifecycle. |
-
-`*IntegrationTest` naming is part of lifecycle ownership. Do not make a test “fast” or “integration” through ad-hoc shell filtering when Maven already has a first-class lifecycle boundary.
 
 </details>
 
 ## Runtime configuration
-
-`TestConfig` is the HTTP configuration boundary. Deterministic tests inject configuration from `PostsApiFixture`; environment parsing exists for explicitly selected external integration.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
@@ -196,190 +147,94 @@ TEST_BASE_URL=https://api.test.example.internal mvn -B -ntp test
 | `TEST_READ_TIMEOUT_MS` | Socket/read budget | `15000` |
 | `TEST_RUN_ID` | Run correlation | generated UUID |
 
-The base URI must be absolute HTTP(S), have a hostname, and contain no URL credentials, query string, or fragment. Timeout values must be positive. Missing `TEST_BASE_URL` is an intentional fail-closed condition when `TestConfig.fromEnvironment()` is used.
+The external base URI must be absolute HTTP(S), have a hostname, and contain no credentials, query string, or fragment. Timeout values must be positive.
 
-## Shared request specification
+## Maven lifecycle and boundaries
 
-`ApiSpecs.request(config)` composes validated base URI, `Accept: application/json`, `X-Test-Run-Id`, connect/socket timeouts, per-request correlation, and `RequestDiagnosticsFilter`. `ApiSpecs.jsonResponse()` provides the common JSON content-type expectation.
+Maven is not merely a command launcher; its lifecycle is part of test architecture. Surefire and Failsafe separate fast verification from integration verification, while Enforcer rejects unsupported Java/Maven environments before meaningful test work begins.
 
-The specification is policy—not a new HTTP language. Endpoint operations remain explicit in the provider-neutral `PostsApiClient`, and tests still inspect native REST Assured `Response` objects.
+Do not replace first-class lifecycle ownership with ad-hoc shell filtering. A test's name and phase communicate expected infrastructure cost and failure domain.
 
-## Correlation and diagnostics
+## Shared request policy
 
-```text
-Test run
-└── X-Test-Run-Id
-    ├── X-Test-Request-Id: uuid-1
-    ├── X-Test-Request-Id: uuid-2
-    └── X-Test-Request-Id: uuid-3
-```
+`ApiSpecs.request(config)` composes validated URI, `Accept: application/json`, `X-Test-Run-Id`, request IDs, transport budgets, and diagnostics. Endpoint operations remain explicit in `PostsApiClient`; native REST Assured `Response` objects stay visible to tests.
 
-`RequestDiagnosticsFilter` generates request identity immediately before transport, measures elapsed time, and emits bounded metadata for HTTP 4xx/5xx responses or runtime/transport exceptions.
-
-Automatic shared diagnostics exclude request/response bodies, authorization values, cookies, and full URLs. Tests remain free to assert response bodies explicitly when those values are part of the contract.
+The abstraction is policy—not a second HTTP language.
 
 ## API assertion depth
 
-A meaningful API test generally addresses multiple independent dimensions:
+A meaningful API test can prove several independent dimensions:
 
 1. **Protocol** — status and content type.
 2. **Structure** — JSON Schema.
 3. **Semantics** — identifiers and business-critical values.
 4. **Boundary behavior** — invalid/error responses.
-5. **Side effects** — persistence/event state when the API mutates observable state.
+5. **Side effects** — persistence/events when mutation matters.
 
-A schema-valid response can still be the wrong resource. A 200 response can still violate business semantics. A semantic assertion without a structure contract can miss incompatible shape drift.
-
-## JSON Schema strategy
-
-List and item endpoints have different top-level structures, so they use distinct version-controlled schemas:
-
-```text
-post-schema.json
-└── array of post objects
-
-single-post-schema.json
-└── one post object
-```
-
-Required fields and semantic minima are constrained while `additionalProperties: true` permits additive provider fields without turning harmless expansions into false breaking changes.
+A schema-valid response can still represent the wrong resource. A `200` can still be semantically wrong. Treat these contracts as complementary, not interchangeable.
 
 ## Deterministic HTTP boundary with WireMock
 
-`PostsApiFixture` owns a dynamic-port `WireMockServer` for the deterministic API surface. `PostApiTest` obtains a validated `TestConfig` from that fixture and then uses the normal `PostsApiClient`/REST Assured stack for list/item requests, schema validation, and semantic assertions.
+`PostsApiFixture` owns a dynamic-port server. Tests execute the normal `PostsApiClient`/REST Assured path against that fixture and verify headers, correlation, JSON behavior, schemas, semantics, and visible error responses.
 
-`LocalHttpContractTest` reuses the same fixture boundary for transport-specific behavior. It proves that the client sends `Accept` compatible with `application/json`, the configured `X-Test-Run-Id`, and a generated UUID-shaped `X-Test-Request-Id`. Matching the Accept header by containment/regex rather than exact raw equality reflects real HTTP negotiation: clients may serialize an equivalent Accept list rather than one exact string.
-
-It also verifies that a JSON `503` remains visible to the test as a protocol/error response rather than being hidden by a custom client wrapper.
-
-The fixture is deliberately small and synthetic. It owns deterministic service availability and response examples; it does not attempt to emulate an entire external provider. Deployed/provider verification belongs to an explicitly configured integration run.
-
-> [!NOTE]
-> WireMock is appropriate here because HTTP status, headers, serialization, schema, and transport-visible behavior are the subject. It should not replace pure/unit assertions that do not require HTTP semantics.
+WireMock stubs the **service boundary**, not REST Assured itself. This preserves serialization, header, status, and request-specification behavior while removing public-network availability from required CI.
 
 ## PostgreSQL integration boundary
 
-`PostgresIntegrationTest` belongs to Failsafe and provisions a real PostgreSQL container when SQL dialect, schema compatibility, transaction semantics, or driver behavior matters.
+`PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only when SQL dialect, driver, schema, or transaction semantics are material.
 
-A container is not a realism badge. It is justified only when real external-system semantics are part of the requirement.
+> [!TIP]
+> A container is not a realism badge. It is justified when real external-system semantics are part of the requirement and should be omitted when they are not.
 
-## Compatibility and extended validation
+## Evidence, CI, and security
 
-Primary CI runs deterministic fast tests on Java 17 and 21 and full `mvn verify` on Java 17. `extended.yml` runs full `mvn verify` on Java 21, adding a second complete-lifecycle signal for REST Assured/JUnit behavior, WireMock, Maven Surefire/Failsafe, PostgreSQL Testcontainers, and Docker/runtime compatibility.
+Primary CI runs deterministic API/framework tests across Java 17/21 and full verification on the primary lifecycle. Extended CI adds a complete Java 21 lifecycle signal. Security and documentation gates remain independent.
 
-Both API paths are repository-owned; the compatibility matrix does not multiply public-network risk. This keeps ordinary CI attributable while validating the complete stack on both supported Java generations over the combined primary/extended gates.
+`RequestDiagnosticsFilter` emits bounded request metadata for failures and excludes bodies, authorization values, cookies, and full URLs from automatic shared diagnostics.
 
-## Security engineering
+## Dependency maintenance
 
-`.github/workflows/security.yml` uses open-source Trivy filesystem scanning. The GitHub Action is pinned to immutable commit `ed142fd0673e97e23eac54620cfb913e5ce36c25` (`v0.36.0`) with Trivy engine `v0.74.0`.
+Dependabot maintains **Maven** and **GitHub Actions** dependencies.
 
-The configured blocking set focuses on fixed HIGH/CRITICAL dependency vulnerabilities and HIGH/CRITICAL supported repository/configuration misconfigurations. `reports/security/trivy.json` and `summary.md` are retained for remediation-focused triage. The configured scanners are `vuln,misconfig`; this repository does not claim that workflow as generic credential/secret scanning.
+- weekly Monday 09:00 America/New_York;
+- minor/patch updates grouped for efficient review;
+- major upgrades remain standalone so Java/JUnit/REST Assured/WireMock/Testcontainers compatibility changes are attributable;
+- GitHub Actions are reviewed as executable dependencies;
+- dependency PRs must clear Enforcer, compile, Surefire/Failsafe, compatibility, security, and docs gates as applicable.
 
-## Observability model
-
-CI combines two levels of correlation plus target classification:
-
-```text
-GitHub Actions run
-└── TEST_RUN_ID
-    ├── Java runtime dimension
-    ├── target: local-wiremock
-    ├── per-request X-Test-Request-Id
-    ├── Surefire/Failsafe reports
-    └── reports/ci-observability-java-<version>.json
-```
-
-The CI envelope contains schema version, framework identity, run ID, Java dimension, deterministic target class, final job status, SHA, and ref. It is intentionally small and vendor-neutral; detailed failure semantics remain in JUnit/Maven reports and request diagnostics.
-
-## CI topology
-
-```mermaid
-flowchart TD
-    PR[Push / PR] --> J17[Fast · Java 17 · local WireMock]
-    PR --> J21[Fast · Java 21 · local WireMock]
-    J17 --> FULL17[Full verify · Java 17]
-    PR --> SEC[Trivy security]
-    PR --> DOCS[README contract]
-    CODECHANGE[API/framework/persistence change] --> EXT[Extended]
-    EXT --> FULL21[Full verify · Java 21]
-    FULL17 --> EV[Surefire + Failsafe + observability]
-    FULL21 --> EV
-    DOCS --> EV
-
-    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
-    classDef core fill:#f6f8fa,stroke:#57606a,color:#24292f,stroke-width:1.5px;
-    classDef gate fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
-    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
-    classDef security fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
-    class PR,CODECHANGE entry;
-    class J17,J21 core;
-    class FULL17,EXT,FULL21,DOCS gate;
-    class SEC security;
-    class EV evidence;
-    linkStyle default stroke:#57606a,stroke-width:1.4px;
-```
+Dependabot proposes updates; Maven lifecycle evidence and release-impact review decide mergeability.
 
 ## Failure triage
 
-| Signal | Boundary | First action |
-| --- | --- | --- |
-| Enforcer failure | Toolchain | Use supported Java/Maven versions |
-| Missing/unsafe `TEST_BASE_URL` | Explicit external integration | Correct the intended environment target before transport |
-| `TestConfig` failure | Runtime input | Correct URI/timeout/run configuration |
-| README contract | Documentation/governance | Fix local reference, workflow badge, Mermaid declaration, governance surface, or palette collision |
-| WireMock startup/stub contract | Repository HTTP fixture | Inspect fixture lifecycle/stub and outbound header/status semantics |
-| Transport exception diagnostic | REST Assured/HTTP | Classify connectivity/timeout before assertions |
-| HTTP 4xx/5xx | Protocol/application/dependency | Correlate by request ID |
-| JSON Schema failure | Structural contract | Compare response shape and schema |
-| Hamcrest semantic failure | API behavior | Inspect asserted field/value |
-| Testcontainers startup | Runtime infrastructure | Inspect Docker/image/resources |
-| Failsafe-only failure | Persistence integration | Keep integration diagnosis separate from fast API conclusions |
-| Java-21-only full failure | Runtime compatibility | Compare tool/runtime behavior before changing semantics |
-| External-target-only failure | Environment/provider | Treat as integration first, not framework health |
-| Trivy failure | Dependency/configuration risk | Triage exact JSON finding/remediation |
-
-> [!WARNING]
-> Broad REST Assured body logging is not a first-response debugging strategy. It increases noise and can leak payloads while doing nothing to classify the failing boundary.
-
-## Extension rules
-
-When adding API behavior:
-
-1. keep required CI deterministic and repository-owned;
-2. keep resource operations explicit in the client;
-3. reuse shared request/response policy;
-4. preserve run/request correlation;
-5. add version-controlled schemas where structural validation matters;
-6. assert critical semantics separately from shape;
-7. use WireMock when HTTP dependency behavior is the requirement;
-8. use Testcontainers only when real external-system semantics are required;
-9. add framework-contract tests for new cross-cutting policy;
-10. keep Maven lifecycle ownership explicit;
-11. keep automatic diagnostics bounded and payload-safe;
-12. require explicit target configuration for external API integration;
-13. update README contracts when public commands, workflows, tool responsibilities, or evidence surfaces change.
+| Signal | First interpretation |
+| --- | --- |
+| Enforcer/compile | Toolchain/build configuration |
+| WireMock startup | Local HTTP fixture lifecycle |
+| Protocol assertion | HTTP behavior |
+| Schema failure | Structural compatibility |
+| Semantic failure | Wrong resource/business value |
+| Header/correlation failure | Shared request policy |
+| Testcontainers startup | Docker/infrastructure |
+| PostgreSQL assertion | DB integration semantics |
+| Java-version-only failure | Runtime compatibility |
+| External-target-only failure | Environment/provider integration |
+| Security/docs | Independent repository governance |
 
 ## Explicit anti-patterns
 
-- required CI against a public demonstration API;
-- silent public fallback in environment-driven configuration;
-- environment parsing inside tests;
-- unbounded HTTP timeouts;
-- global body logging;
-- exact raw-header matching when protocol semantics permit equivalent values;
-- one schema forced onto different endpoint shapes;
-- status-code-only tests;
-- generic client methods that only expose HTTP verbs/paths;
-- Testcontainers for logic that can be proven in-process;
-- integration tests accidentally entering Surefire by naming drift;
-- retries hiding deterministic assertions;
-- local WireMock tests treated as proof of provider availability;
-- README claims or badge surfaces not backed by committed repository state.
+- required CI against a public API;
+- wrapping REST Assured until native response semantics disappear;
+- schema validation as the only correctness assertion;
+- static/shared ports for deterministic fixtures;
+- Testcontainers where database semantics are irrelevant;
+- arbitrary body/auth logging in shared filters;
+- mixing integration tests into the fast phase through shell filtering;
+- expanding retries to hide provider or infrastructure failures.
 
 ## Design references
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — request, deterministic HTTP dependency, persistence, lifecycle, and evidence boundaries.
-- [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — assertion depth, deterministic target policy, integration policy, and gates.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — configuration, request policy, WireMock, persistence, lifecycle, and evidence boundaries.
+- [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — assertion depth, test layers, compatibility, integration, and exit criteria.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — change-quality expectations.
 
-> [!TIP]
-> REST Assured should remain recognizable inside the framework. The highest-value abstractions are the ones that centralize cross-cutting policy while leaving endpoint intent, response semantics, and failure evidence directly inspectable.
+A strong REST Assured framework makes the failing boundary obvious: **build/runtime policy, HTTP protocol, schema, semantics, transport policy, persistence integration, compatibility, or explicit provider environment**.
