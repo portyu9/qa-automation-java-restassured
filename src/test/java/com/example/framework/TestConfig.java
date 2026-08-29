@@ -62,7 +62,7 @@ public record TestConfig(
         if (!uri.isAbsolute() || !isHttp || uri.getHost() == null) {
             throw new IllegalArgumentException("baseUri must be an absolute http(s) URI with a hostname");
         }
-        if (uri.getPort() > 65_535) {
+        if (uri.getPort() == 0 || uri.getPort() > 65_535) {
             throw new IllegalArgumentException("baseUri port must be between 1 and 65535");
         }
         if (uri.getUserInfo() != null) {
