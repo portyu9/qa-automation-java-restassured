@@ -2,15 +2,21 @@
 
 ## Design objective
 
-The framework keeps REST Assured fluent request/assertion APIs visible while centralizing shared request policy, validated runtime configuration, request correlation, schema artifacts, deterministic HTTP fixture ownership, and integration-test lifecycle.
+The framework keeps REST Assured fluent request/assertion APIs visible while centralizing shared request policy, validated runtime configuration, request correlation, schema artifacts, deterministic HTTP fixture ownership, bounded structural telemetry, and integration-test lifecycle.
 
 ```mermaid
 flowchart LR
     T[JUnit tests] --> C[PostsApiClient]
+    T --> NATIVE[Native request/path/query/extraction APIs]
     C --> SPEC[ApiSpecs]
     SPEC --> CFG[TestConfig]
     SPEC --> F[RequestDiagnosticsFilter]
+    T --> TEL[ContractTelemetryFilter]
+    T --> COOKIE[CookieFilter]
     C --> RA[REST Assured]
+    NATIVE --> RA
+    TEL --> RA
+    COOKIE --> RA
     RA --> WM[Repository-owned WireMock fixture]
     EXT[Explicit external integration] --> CFG
     CFG --> API[Configured external API]
@@ -33,18 +39,21 @@ Environment-driven execution is a separate integration path. `TestConfig.fromEnv
 
 ## Configuration invariants
 
-`TestConfig` is an immutable Java record whose **compact constructor** enforces invariants for every construction path, not only `fromEnvironment()`.
+`TestConfig` is an immutable Java record whose compact constructor enforces invariants for every construction path, not only `fromEnvironment()`.
 
 The base URI must:
 
 - be non-null and absolute;
 - use HTTP or HTTPS;
 - contain a hostname;
+- use an explicit port only within 1–65535;
 - contain no URL user-info/credentials;
 - contain no query string or fragment;
 - retain optional path prefixes.
 
-Connect/read timeouts must be positive and run ID must be nonblank. Because constructor validation is universal, test code cannot bypass policy by manually instantiating `TestConfig`.
+Connect/read timeouts must be positive. Run IDs are trimmed and must be 1–128 ASCII letters, digits, dots, underscores, colons, or hyphens because they become request-correlation metadata.
+
+Because constructor validation is universal, test code cannot bypass policy by manually instantiating `TestConfig`.
 
 The environment loader accepts a read-only lookup function for contract tests. This allows missing/invalid external-target behavior to be proved without mutating process-global environment state.
 
@@ -60,6 +69,20 @@ The environment loader accepts a read-only lookup function for contract tests. T
 
 `ApiSpecs.jsonResponse()` contains only response policy that truly applies broadly. Endpoint-specific status and semantic assertions stay with tests/client flows.
 
+## Native protocol composition
+
+Capability tests intentionally keep REST Assured's own request/response model visible. They prove that the shared specification composes with:
+
+- query parameters;
+- path parameters;
+- response-header assertions;
+- body assertions;
+- response extraction;
+- custom filters;
+- scoped `CookieFilter` state.
+
+The framework does not replace these APIs with an internal request DSL. New helpers are justified only when they enforce a durable cross-cutting invariant.
+
 ## Run-level vs request-level correlation
 
 Two identifiers have different purposes:
@@ -69,20 +92,32 @@ Two identifiers have different purposes:
 
 Keeping these separate makes one slow/failing call traceable inside a larger run without overloading a single identifier.
 
-## Request diagnostics
+## Failure diagnostics vs contract telemetry
 
-`RequestDiagnosticsFilter` is a native REST Assured filter. It observes transport/response behavior without changing request semantics.
+`RequestDiagnosticsFilter` and `ContractTelemetryFilter` have deliberately different jobs.
 
-For HTTP failures it emits only bounded structural information:
+### Request diagnostics
 
-- request correlation ID;
+`RequestDiagnosticsFilter` is installed through the shared request specification and emits failure-focused structural context. For HTTP failures it records only bounded method/status/duration/request-correlation information. For transport exceptions it records exception class and duration.
+
+Request/response bodies, authorization headers, cookies, raw URLs, and query strings are intentionally not automatically logged.
+
+### Contract telemetry
+
+`ContractTelemetryFilter` is an opt-in native REST Assured filter for tests that need execution observations. It retains only:
+
 - method;
-- status;
+- sanitized URI path;
+- status code;
 - duration.
 
-For transport exceptions it emits correlation ID, method, exception class, and duration. Request/response bodies, authorization headers, cookies, and URLs are intentionally not automatically logged.
+The in-memory observation window is bounded: the default retains at most 1,000 recent observations, and callers can choose a smaller positive capacity. When full, the oldest observation is discarded. Snapshot reads return immutable copies under synchronization.
 
-This is a privacy-first default. A test can add targeted domain evidence when required, but broad payload dumping should not be enabled globally.
+This prevents a long or data-driven suite from turning a structural telemetry helper into unbounded process memory while preserving thread-safe recent evidence.
+
+## Stateful HTTP behavior
+
+`CookieFilter` is created by the test/flow that owns the session state. It is never installed as a global singleton. This makes cookie replay explicit and prevents authentication/session state from leaking between unrelated tests.
 
 ## Client boundary
 
@@ -107,7 +142,7 @@ This creates a predictable split:
 - `mvn test` / fast profile → framework/API/WireMock fast tests;
 - `mvn verify` → full lifecycle including PostgreSQL integration.
 
-Maven Enforcer establishes Java/Maven runtime floors before test execution. CI jobs are additionally bounded by GitHub Actions timeouts so a stuck browser/container/network dependency cannot consume runner capacity indefinitely.
+Maven Enforcer establishes Java/Maven runtime floors before test execution. CI jobs are additionally bounded by GitHub Actions timeouts so a stuck container/network dependency cannot consume runner capacity indefinitely.
 
 ## Database integration
 
@@ -117,9 +152,11 @@ Database integration tests use isolated Testcontainers PostgreSQL infrastructure
 
 | Failure | First owner |
 | --- | --- |
-| Missing/unsafe `TEST_BASE_URL` during external integration | Configuration |
+| Missing/unsafe `TEST_BASE_URL` or run correlation | Configuration |
 | WireMock startup/stub mismatch | Deterministic HTTP fixture |
 | REST Assured transport/filter failure | HTTP framework boundary |
+| Cookie/state mismatch | Test-owned session state |
+| Telemetry capacity/observation mismatch | Structural telemetry helper |
 | Status/schema/semantic mismatch | API contract |
 | PostgreSQL container/runtime failure | Integration infrastructure |
 | SQL/transaction assertion | Persistence contract |
@@ -132,9 +169,10 @@ New framework behavior should:
 2. place invariants in constructors/configuration boundaries when all callers must obey them;
 3. keep shared request policy in `ApiSpecs`;
 4. use REST Assured filters only for genuine cross-cutting behavior;
-5. keep automatic diagnostics structural and payload-safe;
-6. store schemas as version-controlled test resources;
-7. pair schemas with semantic assertions;
-8. preserve Surefire/Failsafe separation;
-9. require explicit configuration for external API integration;
-10. add framework-contract tests for new configuration/policy invariants.
+5. bound any retained filter state and keep automatic diagnostics payload-safe;
+6. scope cookie/session filters to the owning test flow;
+7. store schemas as version-controlled test resources;
+8. pair schemas with semantic assertions;
+9. preserve Surefire/Failsafe separation;
+10. require explicit configuration for external API integration;
+11. add framework-contract tests for new configuration/policy invariants.
