@@ -18,7 +18,7 @@ Fast CI runs on Java 17 and 21. Full `mvn verify` runs on Java 17 in primary CI 
 
 ## Deterministic API target policy
 
-Required CI must not contact a public demonstration API. `PostsApiFixture` starts WireMock on an ephemeral loopback port and injects a validated `TestConfig` into `JsonPlaceholderClient`.
+Required CI must not contact a public demonstration API. `PostsApiFixture` starts WireMock on an ephemeral loopback port and injects a validated `TestConfig` into the provider-neutral `PostsApiClient`.
 
 This preserves a real HTTP boundary: REST Assured still serializes requests, applies filters and timeouts, receives HTTP responses, and exposes native `Response` objects. Only service availability/data are repository-controlled.
 
