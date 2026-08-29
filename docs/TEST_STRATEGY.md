@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The suite separates fast API/framework contracts from environment-heavy persistence integration while preserving expressive REST Assured assertions. Required API validation runs against repository-owned WireMock fixtures so configuration, schema, diagnostics, and HTTP behavior remain attributable without public-service availability.
+The suite separates fast API/framework contracts from environment-heavy persistence integration while preserving expressive REST Assured assertions. Required API validation runs against repository-owned WireMock fixtures so configuration, schema, diagnostics, protocol composition, and HTTP behavior remain attributable without public-service availability.
 
 ## Test layers
 
@@ -10,7 +10,8 @@ The suite separates fast API/framework contracts from environment-heavy persiste
 | --- | --- | --- | --- |
 | Framework contract | Surefire `test` | No network | Configuration invariants and shared specs |
 | API behavior | Surefire `test` | Dynamic-port WireMock | Status, protocol, schema, semantics |
-| HTTP policy/error behavior | Surefire `test` | Dynamic-port WireMock | Headers, correlation, error visibility |
+| Native protocol capability | Surefire `test` | Dynamic-port WireMock | Query/path params, extraction, filters, cookies |
+| HTTP policy/error behavior | Surefire `test` | Dynamic-port WireMock | Headers, correlation, diagnostics/telemetry |
 | Database integration | Failsafe `verify` | Testcontainers PostgreSQL | Persistence/integration behavior |
 | External API integration | Explicit/manual | Configured `TEST_BASE_URL` | Environment/provider behavior |
 
@@ -32,10 +33,24 @@ External-provider validation is intentionally separate. `TestConfig.fromEnvironm
 - URL credentials;
 - query-bearing base URIs;
 - fragment-bearing base URIs;
+- explicit port `0` or values above `65535`;
 - non-positive timeout budgets;
-- blank run IDs.
+- blank, unsafe, or overlong run IDs.
 
 The environment loader accepts an injected read-only lookup so negative tests do not mutate process-global environment state. Universal constructor validation prevents manually built configurations from bypassing policy.
+
+## Native REST Assured capability coverage
+
+Capability tests intentionally use native REST Assured features directly with shared framework policy rather than hiding them behind another request DSL. Required deterministic coverage proves composition of:
+
+- shared request/response specifications;
+- query and path parameters;
+- status/header/body assertions;
+- response extraction;
+- custom filters;
+- scoped `CookieFilter` state across related requests.
+
+Cookie filters are owned by the test flow that needs session persistence. They are not static/global fixtures because shared cookie state would make tests order-dependent.
 
 ## API assertion depth
 
@@ -55,11 +70,15 @@ Keep list and item schemas distinct and version-controlled under `src/test/resou
 
 Schema changes require review like source changes. Do not silently loosen schemas merely to make a provider or fixture change pass.
 
-## Correlation and diagnostics
+## Correlation, diagnostics, and telemetry
 
-Every shared request carries a run ID; the diagnostics filter generates a per-request ID. On HTTP/transport failure the default diagnostic stream contains structural data only: method, status/error class, duration, request correlation.
+Every shared request carries a validated run ID; the diagnostics filter generates a per-request ID. On HTTP/transport failure the default diagnostic stream contains structural data only: method, status/error class, duration, request correlation.
 
-Automatic logging deliberately excludes payloads, auth headers, cookies, and URLs. If a failure requires payload evidence, add a narrowly scoped assertion/log at the test/domain boundary using synthetic data rather than enabling global request/response dumps.
+Automatic logging deliberately excludes payloads, auth headers, cookies, and raw URLs. If a failure requires payload evidence, add a narrowly scoped assertion/log at the test/domain boundary using synthetic data rather than enabling global request/response dumps.
+
+`ContractTelemetryFilter` is separate from failure diagnostics. It is opt-in for tests that need recent execution observations and retains only method, sanitized path, status, and duration. The observation window is bounded (default 1,000, caller-configurable positive capacity), discards oldest entries when full, and returns immutable snapshots under synchronization.
+
+The bounded telemetry contract should be preserved if data-driven or parallel coverage expands. A test helper must not turn a large suite into an unbounded in-memory event sink.
 
 WireMock request verification is used only when transport-visible behavior itself is the requirement—for example `Accept`, run correlation, generated request IDs, or error-status observability.
 
@@ -86,7 +105,7 @@ The CI matrix proves distinct properties:
 - Java 21 can complete the full extended `verify` lifecycle;
 - neither API gate depends on public DNS, TLS, third-party data, rate limits, or uptime.
 
-JUnit/Surefire/Failsafe reports are retained for attribution. CI observability identifies the API target class as `local-wiremock`. Maven Enforcer fails unsupported Java/Maven environments before tests begin.
+JUnit/Surefire/Failsafe reports are retained for attribution. CI observability identifies the API target class as `local-wiremock`. Maven Enforcer fails unsupported Java/Maven environments before tests begin. Repository security is a separate Trivy gate covering vulnerability, misconfiguration, and committed-secret findings.
 
 ## Failure classification
 
@@ -95,8 +114,10 @@ JUnit/Surefire/Failsafe reports are retained for attribution. CI observability i
 | Enforcer/build | Toolchain/dependency configuration |
 | Framework configuration | Shared input/policy regression |
 | WireMock startup/stub verification | Repository-owned HTTP fixture |
+| Native query/path/extraction/cookie assertion | Protocol-composition/state contract |
 | HTTP status/schema/semantic assertion | API contract/behavior mismatch |
 | Request diagnostics transport error | REST Assured/HTTP transport context |
+| Telemetry capacity/observation assertion | Structural telemetry policy |
 | Failsafe/container | Integration environment/lifecycle |
 | External-target-only failure | Environment/provider integration |
 
@@ -110,6 +131,8 @@ A Java API/framework change is ready when:
 - fast tests pass on Java 17 and 21;
 - constructor and environment configuration-negative contracts pass;
 - deterministic WireMock HTTP/schema/semantic contracts pass;
+- native query/path/extraction/cookie/filter capability contracts pass;
+- telemetry remains bounded and payload-safe;
 - full `mvn verify` passes on both covered Java generations when integration behavior is in scope;
 - required CI has no public API dependency;
 - automatic diagnostics remain payload-safe;
