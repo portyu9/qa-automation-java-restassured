@@ -18,10 +18,9 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RestAssuredCapabilitiesTest {
     @Test
@@ -49,7 +48,7 @@ class RestAssuredCapabilitiesTest {
                     .spec(ApiSpecs.jsonResponse())
                     .statusCode(200)
                     .header("X-Contract-Version", "v1")
-                    .body("id", equalTo(42))
+                    .body("id", org.hamcrest.Matchers.equalTo(42))
                     .extract()
                     .path("title");
 
@@ -59,7 +58,7 @@ class RestAssuredCapabilitiesTest {
                     () -> assertEquals("GET", observation.method()),
                     () -> assertEquals("/posts/42", observation.path()),
                     () -> assertEquals(200, observation.statusCode()),
-                    () -> assertFalse(observation.durationMs() < 0));
+                    () -> assertTrue(observation.durationMs() >= 0));
         } finally {
             server.stop();
         }
@@ -91,7 +90,7 @@ class RestAssuredCapabilitiesTest {
                     .then()
                     .spec(ApiSpecs.jsonResponse())
                     .statusCode(201)
-                    .body("authenticated", equalTo(true));
+                    .body("authenticated", org.hamcrest.Matchers.equalTo(true));
 
             given()
                     .spec(ApiSpecs.request(config))
@@ -101,7 +100,7 @@ class RestAssuredCapabilitiesTest {
                     .then()
                     .spec(ApiSpecs.jsonResponse())
                     .statusCode(200)
-                    .body("authenticated", equalTo(true));
+                    .body("authenticated", org.hamcrest.Matchers.equalTo(true));
         } finally {
             server.stop();
         }
