@@ -65,6 +65,43 @@ class RestAssuredCapabilitiesTest {
     }
 
     @Test
+    void telemetryRetainsOnlyTheConfiguredRecentObservationWindow() {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            server.stubFor(get(urlEqualTo("/first")).willReturn(okJson("{\"step\":1}")));
+            server.stubFor(get(urlEqualTo("/second")).willReturn(okJson("{\"step\":2}")));
+
+            TestConfig config = new TestConfig(URI.create(server.baseUrl()), 1_000, 2_000, "bounded-telemetry");
+            ContractTelemetryFilter telemetry = new ContractTelemetryFilter(1);
+
+            given()
+                    .spec(ApiSpecs.request(config))
+                    .filter(telemetry)
+                    .when()
+                    .get("/first")
+                    .then()
+                    .statusCode(200);
+
+            given()
+                    .spec(ApiSpecs.request(config))
+                    .filter(telemetry)
+                    .when()
+                    .get("/second")
+                    .then()
+                    .statusCode(200);
+
+            var observations = telemetry.observations();
+            assertAll(
+                    () -> assertEquals(1, observations.size()),
+                    () -> assertEquals("/second", observations.get(0).path()),
+                    () -> assertEquals(200, observations.get(0).statusCode()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
     void cookieFilterPersistsServerStateAcrossRequests() {
         WireMockServer server = new WireMockServer(options().dynamicPort());
         server.start();
