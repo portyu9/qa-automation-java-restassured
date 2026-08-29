@@ -14,14 +14,14 @@ class FrameworkContractTest {
                 "TEST_BASE_URL", "https://api.example.test/v1/",
                 "TEST_CONNECT_TIMEOUT_MS", "1200",
                 "TEST_READ_TIMEOUT_MS", "3400",
-                "TEST_RUN_ID", "framework-contract");
+                "TEST_RUN_ID", " framework:contract-42 ");
 
         var config = TestConfig.fromEnvironment(variables::get);
 
         assertEquals(URI.create("https://api.example.test/v1"), config.baseUri());
         assertEquals(1_200, config.connectTimeoutMs());
         assertEquals(3_400, config.readTimeoutMs());
-        assertEquals("framework-contract", config.runId());
+        assertEquals("framework:contract-42", config.runId());
     }
 
     @Test
@@ -46,7 +46,7 @@ class FrameworkContractTest {
     }
 
     @Test
-    void configurationRejectsUnsafeUrlsAndInvalidBudgets() {
+    void configurationRejectsUnsafeUrlsBudgetsAndCorrelationIdentity() {
         assertThrows(IllegalArgumentException.class, () -> new TestConfig(
                 URI.create("https://user:password@example.test/api"),
                 1_000,
@@ -63,6 +63,16 @@ class FrameworkContractTest {
                 2_000,
                 "run"));
         assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test:0"),
+                1_000,
+                2_000,
+                "run"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test:70000"),
+                1_000,
+                2_000,
+                "run"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
                 URI.create("https://example.test"),
                 0,
                 2_000,
@@ -71,7 +81,17 @@ class FrameworkContractTest {
                 URI.create("https://example.test"),
                 1_000,
                 2_000,
-                "  "));
+                "unsafe run id"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test"),
+                1_000,
+                2_000,
+                "line-break\nheader"));
+        assertThrows(IllegalArgumentException.class, () -> new TestConfig(
+                URI.create("https://example.test"),
+                1_000,
+                2_000,
+                "x".repeat(129)));
     }
 
     @Test
@@ -83,5 +103,11 @@ class FrameworkContractTest {
                 "TEST_BASE_URL", "https://api.example.test",
                 "TEST_READ_TIMEOUT_MS", "0");
         assertThrows(IllegalStateException.class, () -> TestConfig.fromEnvironment(invalidTimeout::get));
+    }
+
+    @Test
+    void telemetryCapacityMustBePositive() {
+        assertThrows(IllegalArgumentException.class, () -> new ContractTelemetryFilter(0));
+        assertNotNull(new ContractTelemetryFilter(1));
     }
 }
