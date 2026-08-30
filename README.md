@@ -36,7 +36,7 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 | HTTP contract | Shared headers/correlation/error visibility | WireMock dynamic port | JUnit/Surefire |
 | External API | Provider/environment behavior | Explicit `TEST_BASE_URL` | Intentional integration signal |
 | Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers PostgreSQL | Failsafe reports |
-| Compatibility | Runtime/toolchain compatibility | Java 17 + 21 | Matrix reports |
+| Compatibility | Runtime/toolchain compatibility | Java 17 + 21; Maven 3.9.16 Wrapper | Matrix reports |
 | Security | Dependency/configuration exposure | Trivy filesystem scan | JSON + Markdown findings |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
 
@@ -85,6 +85,7 @@ flowchart TD
 | HTTP simulation | WireMock is used where transport-visible behavior is material—not as a universal mock. |
 | Persistence | Testcontainers is used only when PostgreSQL semantics matter. |
 | Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest`. |
+| Build toolchain | Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256. |
 | Compatibility | Java 17/21 fast validation plus full lifecycle coverage. |
 | CI safety | Read-only permissions, concurrency cancellation, bounded jobs. |
 
@@ -109,6 +110,8 @@ flowchart TD
 ├── .github/
 │   ├── scripts/
 │   └── workflows/
+├── .mvn/
+│   └── wrapper/
 ├── docs/
 └── src/
     └── test/
@@ -124,23 +127,25 @@ flowchart TD
 
 ## Quick start
 
-Prerequisites: Java 17+, Maven 3.9+, and a Docker-compatible runtime for PostgreSQL integration verification.
+Prerequisites: Java 17+ and a Docker-compatible runtime for PostgreSQL integration verification. The checked-in Maven Wrapper downloads Maven 3.9.16 on first use and validates the distribution against the repository-pinned SHA-256 before installation; a separately installed Maven is not required.
 
 ```bash
 # fast deterministic API gate
-mvn -B -ntp -Pfast test
+./mvnw -B -ntp -Pfast test
 
 # complete Maven lifecycle
-mvn -B -ntp verify
+./mvnw -B -ntp verify
 
 # documentation contract
 python .github/scripts/validate_readme.py
 ```
 
+On Windows, use `mvnw.cmd` in place of `./mvnw`.
+
 Explicit deployed API integration:
 
 ```bash
-TEST_BASE_URL=https://api.test.example.internal mvn -B -ntp test
+TEST_BASE_URL=https://api.test.example.internal ./mvnw -B -ntp test
 ```
 
 <details>
@@ -148,9 +153,9 @@ TEST_BASE_URL=https://api.test.example.internal mvn -B -ntp test
 
 | Invocation | Primary scope |
 | --- | --- |
-| `mvn -B -ntp -Pfast test` | Deterministic Surefire API/framework/WireMock tests. |
-| `mvn -B -ntp test` | Standard Surefire fast tests. |
-| `mvn -B -ntp verify` | Surefire + Failsafe integration lifecycle. |
+| `./mvnw -B -ntp -Pfast test` | Deterministic Surefire API/framework/WireMock tests. |
+| `./mvnw -B -ntp test` | Standard Surefire fast tests. |
+| `./mvnw -B -ntp verify` | Surefire + Failsafe integration lifecycle. |
 
 </details>
 
@@ -167,7 +172,7 @@ The external base URI must be absolute HTTP(S), have a hostname, and contain no 
 
 ## Maven lifecycle and boundaries
 
-Maven is not merely a command launcher; its lifecycle is part of test architecture. Surefire and Failsafe separate fast verification from integration verification, while Enforcer rejects unsupported Java/Maven environments before meaningful test work begins.
+Maven is not merely a command launcher; its lifecycle is part of test architecture. Surefire and Failsafe separate fast verification from integration verification, while Enforcer rejects unsupported Java/Maven environments before meaningful test work begins. Repository and CI execution use the checksum-pinned Maven Wrapper so the Maven executable itself is version-controlled policy rather than an ambient runner dependency.
 
 Do not replace first-class lifecycle ownership with ad-hoc shell filtering. A test's name and phase communicate expected infrastructure cost and failure domain.
 
@@ -219,18 +224,19 @@ WireMock stubs the **service boundary**, not REST Assured itself. This preserves
 
 ## Evidence, CI, and security
 
-Primary CI runs deterministic API/framework tests across Java 17/21 and full verification on the primary lifecycle. Extended CI adds a complete Java 21 lifecycle signal. Security and documentation gates remain independent.
+Primary CI runs deterministic API/framework tests across Java 17/21 and full verification on the primary lifecycle through the checksum-pinned Maven Wrapper. Extended CI adds a complete Java 21 lifecycle signal through the same wrapper. Security and documentation gates remain independent.
 
 Failure diagnostics and protocol telemetry are deliberately bounded. Bodies, authorization values, cookies, full URLs, and query strings are excluded from automatic shared evidence.
 
 ## Dependency maintenance
 
-Dependabot maintains **Maven** and **GitHub Actions** dependencies.
+Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through Wrapper 3.3.4, Maven 3.9.16, and a checked distribution SHA-256.
 
 - weekly Monday 09:00 America/New_York;
 - minor/patch updates grouped for efficient review;
 - major upgrades remain standalone so Java/JUnit/REST Assured/WireMock/Testcontainers compatibility changes are attributable;
 - GitHub Actions are reviewed as executable dependencies;
+- Maven-wrapper changes require an intentional version/checksum update and full lifecycle verification;
 - dependency PRs must clear Enforcer, compile, Surefire/Failsafe, compatibility, security, and docs gates as applicable.
 
 Dependabot proposes updates; Maven lifecycle evidence and release-impact review decide mergeability.
@@ -239,6 +245,7 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 
 | Signal | First interpretation |
 | --- | --- |
+| Wrapper/checksum | Maven toolchain provenance/download integrity |
 | Enforcer/compile | Toolchain/build configuration |
 | WireMock startup | Local HTTP fixture lifecycle |
 | Protocol assertion | HTTP behavior |
@@ -257,6 +264,8 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 ## Explicit anti-patterns
 
 - required CI against a public API;
+- bypassing the checked-in Maven Wrapper with an ambient Maven executable in repository automation;
+- removing distribution checksum validation when changing the Maven toolchain;
 - wrapping REST Assured until native response semantics disappear;
 - global cookie/session filters shared across unrelated tests;
 - schema validation as the only correctness assertion;

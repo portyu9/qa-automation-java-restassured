@@ -31,11 +31,13 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: maven
+      - name: Verify checksum-pinned Maven wrapper
+        run: ./mvnw -v
       - name: Fast API and framework tests against repository-owned WireMock fixtures
-        run: mvn -B -ntp -Pfast test
+        run: ./mvnw -B -ntp -Pfast test
       - name: Full verification including local HTTP and container integration tests
         if: matrix.java == 17
-        run: mvn -B -ntp verify
+        run: ./mvnw -B -ntp verify
       - name: Publish CI observability summary
         if: always()
         env:
@@ -55,6 +57,7 @@ jobs:
             echo
             echo "- Run ID: \`${TEST_RUN_ID}\`"
             echo "- Job status: \`${JOB_STATUS}\`"
+            echo '- Maven: `3.9.16` via checksum-pinned Wrapper 3.3.4'
             echo '- API target: repository-owned dynamic-port WireMock fixture'
             echo '- Evidence: Surefire/Failsafe reports + request correlation diagnostics + CI observability envelope'
           } | tee "reports/ci-summary-java-${{ matrix.java }}.md" >> "$GITHUB_STEP_SUMMARY"
