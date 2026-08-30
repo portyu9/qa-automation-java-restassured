@@ -7,6 +7,9 @@ on:
     paths:
       - "src/**"
       - "pom.xml"
+      - ".mvn/wrapper/**"
+      - "mvnw"
+      - "mvnw.cmd"
       - ".github/workflows/extended.yml"
   schedule:
     - cron: "17 8 * * 3"
@@ -32,8 +35,10 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
+      - name: Verify checksum-pinned Maven wrapper
+        run: ./mvnw -v
       - name: Run full Maven lifecycle with local API and container integration coverage
-        run: mvn -B -ntp verify
+        run: ./mvnw -B -ntp verify
       - name: Publish Java observability summary
         if: always()
         run: |
@@ -42,6 +47,7 @@ jobs:
             echo '### REST Assured · Java 21 full verify'
             echo
             echo "- Run ID: \`${TEST_RUN_ID}\`"
+            echo '- Maven: `3.9.16` via checksum-pinned Wrapper 3.3.4'
             echo '- API boundary: repository-owned dynamic-port WireMock fixtures'
             echo '- Persistence boundary: PostgreSQL Testcontainers'
             echo '- Lifecycle: Surefire + Failsafe'
