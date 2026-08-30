@@ -106,17 +106,20 @@ flowchart TD
 
 ```text
 .
-├── src/test/java/com/example/
-│   ├── api/{PostsApiClient.java,PostApiTest.java,LocalHttpContractTest.java,RestAssuredCapabilitiesTest.java}
-│   ├── db/PostgresIntegrationTest.java
-│   ├── framework/{ApiSpecs.java,RequestDiagnosticsFilter.java,ContractTelemetryFilter.java,TestConfig.java,FrameworkContractTest.java}
-│   └── testing/PostsApiFixture.java
-├── src/test/resources/{post-schema.json,single-post-schema.json}
-├── docs/{ARCHITECTURE.md,TEST_STRATEGY.md}
-├── .github/workflows/{ci,docs,extended,security}.yml
-├── CONTRIBUTING.md
-├── .env.example
-└── pom.xml
+├── .github/
+│   ├── scripts/
+│   └── workflows/
+├── docs/
+└── src/
+    └── test/
+        ├── java/
+        │   └── com/
+        │       └── example/
+        │           ├── api/
+        │           ├── db/
+        │           ├── framework/
+        │           └── testing/
+        └── resources/
 ```
 
 ## Quick start
