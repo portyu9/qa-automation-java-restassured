@@ -17,6 +17,9 @@ import java.util.concurrent.TimeUnit;
  */
 public final class ContractTelemetryFilter implements Filter {
     public static final int DEFAULT_MAX_OBSERVATIONS = 1_000;
+    private static final int MAX_METHOD_LENGTH = 32;
+    private static final int MAX_PATH_LENGTH = 500;
+    private static final String TRUNCATION_MARKER = "…<truncated>";
 
     private final int maxObservations;
     private final ArrayDeque<Observation> observations = new ArrayDeque<>();
@@ -43,7 +46,7 @@ public final class ContractTelemetryFilter implements Filter {
         long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
         var observation = new Observation(
-                requestSpec.getMethod(),
+                bounded(requestSpec.getMethod(), MAX_METHOD_LENGTH),
                 sanitizedPath(requestSpec.getURI()),
                 response.statusCode(),
                 durationMs);
@@ -65,11 +68,18 @@ public final class ContractTelemetryFilter implements Filter {
 
     private static String sanitizedPath(String uri) {
         try {
-            String path = URI.create(uri).getPath();
-            return path == null || path.isBlank() ? "/" : path;
+            String path = URI.create(uri).getRawPath();
+            return bounded(path == null || path.isBlank() ? "/" : path, MAX_PATH_LENGTH);
         } catch (IllegalArgumentException ignored) {
             return "<invalid-uri>";
         }
+    }
+
+    private static String bounded(String value, int maxLength) {
+        String normalized = value == null ? "UNKNOWN" : value;
+        if (normalized.length() <= maxLength) return normalized;
+        int prefixLength = maxLength - TRUNCATION_MARKER.length();
+        return normalized.substring(0, prefixLength) + TRUNCATION_MARKER;
     }
 
     public record Observation(String method, String path, int statusCode, long durationMs) {}
