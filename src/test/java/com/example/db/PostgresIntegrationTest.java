@@ -10,16 +10,18 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Integration tests against a real PostgreSQL instance using Testcontainers.  
- *
- * I spin up a lightweight PostgreSQL container before all tests and tear it down afterwards.  
- * The test demonstrates creating a table, inserting a row and verifying the persisted data using JDBC.
+ * Provider-specific persistence contract against an isolated PostgreSQL
+ * Testcontainers instance. Test-owned state is connection-scoped so reruns do
+ * not depend on row ordering, pre-existing identifiers, or cleanup timing.
  */
-@DisplayName("PostgreSQL Integration Tests")
+@DisplayName("PostgreSQL integration contracts")
 public class PostgresIntegrationTest {
 
     private static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
@@ -38,21 +40,36 @@ public class PostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("Persisting and querying data works")
-    void shouldPersistAndQueryData() throws Exception {
-        try (Connection conn = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
-            // Create table if not exists
-            conn.createStatement().execute("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name VARCHAR(50));");
-            // Insert a row
-            try (PreparedStatement stmt = conn.prepareStatement("INSERT INTO users(name) VALUES (?)", PreparedStatement.RETURN_GENERATED_KEYS)) {
-                stmt.setString(1, "Alice");
-                stmt.executeUpdate();
+    @DisplayName("Generated identity can be used to read the row that was written")
+    void shouldPersistAndQueryTheOwnedRow() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("CREATE TEMP TABLE users (id BIGSERIAL PRIMARY KEY, name VARCHAR(50) NOT NULL)");
             }
-            // Query data
-            try (ResultSet rs = conn.createStatement().executeQuery("SELECT name FROM users WHERE id = 1;")) {
-                rs.next();
-                String name = rs.getString("name");
-                assertEquals("Alice", name, "The retrieved name should match the inserted value.");
+
+            long insertedId;
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO users(name) VALUES (?)",
+                    Statement.RETURN_GENERATED_KEYS)) {
+                insert.setString(1, "contract-user");
+                assertEquals(1, insert.executeUpdate());
+
+                try (ResultSet keys = insert.getGeneratedKeys()) {
+                    assertTrue(keys.next(), "PostgreSQL should return the generated identity");
+                    insertedId = keys.getLong(1);
+                    assertFalse(keys.next(), "One insert must produce exactly one generated identity");
+                }
+            }
+
+            try (PreparedStatement select = connection.prepareStatement(
+                    "SELECT name FROM users WHERE id = ?")) {
+                select.setLong(1, insertedId);
+                try (ResultSet result = select.executeQuery()) {
+                    assertTrue(result.next(), "The inserted row should be queryable by its generated identity");
+                    assertEquals("contract-user", result.getString("name"));
+                    assertFalse(result.next(), "The generated identity should identify exactly one row");
+                }
             }
         }
     }
