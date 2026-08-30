@@ -16,6 +16,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -96,6 +97,35 @@ class RestAssuredCapabilitiesTest {
                     () -> assertEquals(1, observations.size()),
                     () -> assertEquals("/second", observations.get(0).path()),
                     () -> assertEquals(200, observations.get(0).statusCode()));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void telemetryBoundsRetainedPathText() {
+        WireMockServer server = new WireMockServer(options().dynamicPort());
+        server.start();
+        try {
+            server.stubFor(get(urlPathMatching("/long/.*"))
+                    .willReturn(okJson("{\"ok\":true}")));
+
+            TestConfig config = new TestConfig(URI.create(server.baseUrl()), 1_000, 2_000, "bounded-path");
+            ContractTelemetryFilter telemetry = new ContractTelemetryFilter();
+            String path = "/long/" + "x".repeat(700);
+
+            given()
+                    .spec(ApiSpecs.request(config))
+                    .filter(telemetry)
+                    .when()
+                    .get(path)
+                    .then()
+                    .statusCode(200);
+
+            String retainedPath = telemetry.observations().get(0).path();
+            assertAll(
+                    () -> assertEquals(500, retainedPath.length()),
+                    () -> assertTrue(retainedPath.endsWith("…<truncated>")));
         } finally {
             server.stop();
         }
