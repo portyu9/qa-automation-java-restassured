@@ -49,7 +49,7 @@ jobs:
             echo "- Run ID: \`${TEST_RUN_ID}\`"
             echo '- Maven: `3.9.16` via checksum-pinned Wrapper 3.3.4'
             echo '- API boundary: repository-owned dynamic-port WireMock fixtures'
-            echo '- Persistence boundary: Testcontainers 2 + PostgreSQL 16.15'
+            echo '- Persistence boundary: Testcontainers 1.21.4 + PostgreSQL 16.15'
             echo '- Lifecycle: Surefire + Failsafe'
             echo "- Job status: \`${{ job.status }}\`"
             echo '- Evidence: Maven Surefire/Failsafe XML and text reports'
