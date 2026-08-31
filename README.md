@@ -20,7 +20,7 @@
 [![License](https://img.shields.io/badge/License-MIT-2EA44F?logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-24292F?logo=github&logoColor=white)](.github/SECURITY.md)
 
-A Java API and persistence quality-engineering framework using **REST Assured, JUnit 5, Hamcrest, JSON Schema, WireMock, Testcontainers, PostgreSQL, and Maven**. The design keeps protocol semantics, structural contracts, business semantics, stateful HTTP behavior, persistence integration, runtime compatibility, and repository security as independently attributable verification planes.
+A Java API and persistence quality-engineering framework using **REST Assured, JUnit, Hamcrest, JSON Schema, WireMock, Testcontainers, PostgreSQL, and Maven**. The design keeps protocol semantics, structural contracts, business semantics, stateful HTTP behavior, persistence integration, runtime compatibility, and repository security as independently attributable verification planes.
 
 > [!IMPORTANT]
 > Required API CI is repository-owned. REST Assured exercises real HTTP behavior against dynamic-port WireMock fixtures; deployed APIs are explicit integration targets through `TEST_BASE_URL`, never a hidden prerequisite for framework correctness.
@@ -35,7 +35,7 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 | Protocol composition | Path/query parameters, specs, extraction, cookies, bounded telemetry | Native REST Assured filters/specs | JUnit/Surefire |
 | HTTP contract | Shared headers/correlation/error visibility | WireMock dynamic port | JUnit/Surefire |
 | External API | Provider/environment behavior | Explicit `TEST_BASE_URL` | Intentional integration signal |
-| Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers 2 + PostgreSQL 16.15 | Failsafe reports |
+| Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers 1.21.4 + PostgreSQL 16.15 | Failsafe reports |
 | Compatibility | Runtime/toolchain compatibility | Java 17 + 21 + 25; Maven 3.9.16 Wrapper | Matrix reports |
 | Security | Source, dependency-change, dependency/configuration, and secret exposure | CodeQL + Dependency Review + Trivy | Code scanning + workflow evidence |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
@@ -83,7 +83,7 @@ flowchart TD
 | Stateful HTTP | REST Assured `CookieFilter` is scoped to scenarios that intentionally require cookie persistence. |
 | Assertion depth | Protocol, structure, semantics, and error behavior are independent contracts. |
 | HTTP simulation | WireMock is used where transport-visible behavior is material—not as a universal mock. |
-| Persistence | Testcontainers 2 owns the PostgreSQL integration boundary; the fixture image is explicitly pinned to `postgres:16.15-alpine`. |
+| Persistence | Testcontainers 1.21.4 owns the PostgreSQL integration boundary; the fixture image is explicitly pinned to `postgres:16.15-alpine`. |
 | Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest`. |
 | Build toolchain | Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256. |
 | Compatibility | Java 17 baseline, Java 21 previous-LTS, and Java 25 current-LTS fast qualification; full lifecycle on Java 17 and 25. |
@@ -219,7 +219,9 @@ WireMock stubs the **service boundary**, not REST Assured itself. This preserves
 
 ## PostgreSQL integration boundary
 
-`PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only when SQL dialect, driver, schema, or transaction semantics are material. The integration module uses the Testcontainers 2 PostgreSQL coordinate/namespace and an explicit `postgres:16.15-alpine` image so a future mutable `16-alpine` tag cannot silently change the database minor during an otherwise unchanged framework run.
+`PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only when SQL dialect, driver, schema, or transaction semantics are material. The integration image is pinned to `postgres:16.15-alpine` so a mutable `16-alpine` tag cannot silently change the database minor during an otherwise unchanged framework run.
+
+The repository intentionally retains Testcontainers 1.21.4 for this boundary until a safe 2.x migration is demonstrated. A direct 2.0.5 migration was compile-clean but failed at Docker-client initialization because the assembled runtime exposed an incompatible Jackson annotation version; current upstream 2.0.5 also has reported security concerns in its shaded Jackson layer. Because the 2.x PostgreSQL artifact and Java package were renamed, a future migration must be deliberate and integration-tested rather than inferred from the absence of a Dependabot PR.
 
 > [!TIP]
 > A container is not a realism badge. It is justified when real external-system semantics are part of the requirement and should be omitted when they are not.
@@ -243,7 +245,7 @@ Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execut
 - Maven-wrapper changes require an intentional version/checksum update and full lifecycle verification;
 - dependency PRs must clear Enforcer, compile, Surefire/Failsafe, compatibility, security, and docs gates as applicable.
 
-Dependabot proposes updates for dependencies whose package coordinates remain stable. Ecosystem migrations that rename coordinates or Java packages—such as the Testcontainers 2 PostgreSQL module move to `org.testcontainers:testcontainers-postgresql` and `org.testcontainers.postgresql`—require an intentional migration with compilation and integration evidence rather than pretending an absent bot PR means the old major is current. Maven lifecycle evidence and release-impact review decide mergeability.
+Dependabot proposes updates for dependencies whose package coordinates remain stable. Ecosystem migrations that rename coordinates or Java packages require an intentional migration with compilation and integration evidence. Testcontainers 2 is such a migration, and its current 2.0.5 line is deliberately deferred here because the attempted migration did not satisfy the repository’s runtime/security acceptance criteria. Maven lifecycle evidence and release-impact review decide mergeability.
 
 ## Failure triage
 
@@ -259,7 +261,7 @@ Dependabot proposes updates for dependencies whose package coordinates remain st
 | Schema failure | Structural compatibility |
 | Semantic failure | Wrong resource/business value |
 | Header/correlation failure | Shared request policy |
-| Testcontainers startup | Docker/container integration infrastructure |
+| Testcontainers startup | Docker/container integration infrastructure or assembled dependency compatibility |
 | PostgreSQL assertion | DB integration semantics |
 | Java-version-only failure | Runtime compatibility |
 | External-target-only failure | Environment/provider integration |
@@ -279,6 +281,7 @@ Dependabot proposes updates for dependencies whose package coordinates remain st
 - static/shared ports for deterministic fixtures;
 - Testcontainers where database semantics are irrelevant;
 - floating container tags where database-version changes should remain attributable;
+- forcing a major dependency migration through compatibility overrides when the assembled runtime or upstream security state is not acceptable;
 - arbitrary body/auth/query/cookie logging in shared filters;
 - mixing integration tests into the fast phase through shell filtering;
 - expanding retries to hide provider or infrastructure failures.
