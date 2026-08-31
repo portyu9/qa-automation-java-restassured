@@ -6,7 +6,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
-def parse_reports(directory: Path) -> tuple[int, int, int, int, int]:
+def parse_reports(directory: Path) -> tuple[int, int, int, int, int, int]:
     files = sorted(directory.glob("TEST-*.xml"))
     if not files:
         raise SystemExit(f"missing Maven XML evidence: {directory}/TEST-*.xml")
@@ -26,7 +26,14 @@ def parse_reports(directory: Path) -> tuple[int, int, int, int, int]:
             totals[key] += value
 
     executed = totals["tests"] - totals["skipped"]
-    return len(files), totals["tests"], totals["failures"], totals["errors"], totals["skipped"], executed
+    return (
+        len(files),
+        totals["tests"],
+        totals["failures"],
+        totals["errors"],
+        totals["skipped"],
+        executed,
+    )
 
 
 def validate(label: str, directory: Path, minimum_executed: int) -> None:
