@@ -17,13 +17,14 @@ env:
   TEST_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  verify:
+  compatibility-fast:
+    name: Java ${{ matrix.java }} fast compatibility
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        java: [17, 21, 25]
+        java: [17, 21]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
@@ -35,10 +36,56 @@ jobs:
         run: ./mvnw -v
       - name: Fast API and framework tests against repository-owned WireMock fixtures
         run: ./mvnw -B -ntp -Pfast test
-      - name: Full verification including local HTTP and container integration tests
-        if: matrix.java == 17
+      - name: Validate semantic Surefire evidence
+        run: python3 .github/scripts/validate_maven_evidence.py --surefire-min 14
+      - name: Publish compatibility summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p reports
+          {
+            echo "### REST Assured · Java ${{ matrix.java }} fast compatibility"
+            echo
+            echo "- Run ID: \`${TEST_RUN_ID}\`"
+            echo "- Job status: \`${JOB_STATUS}\`"
+            echo '- Maven: `3.9.16` via checksum-pinned Wrapper 3.3.4'
+            echo '- API target: repository-owned dynamic-port WireMock fixture'
+            echo '- Evidence: at least 14 executed Surefire tests, zero failures/errors/skips'
+          } | tee "reports/ci-summary-java-${{ matrix.java }}.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: restassured-java-${{ matrix.java }}-fast-evidence
+          path: |
+            reports/
+            target/surefire-reports/
+          if-no-files-found: error
+          retention-days: 14
+
+  current-lts-full-verify:
+    name: Java 25 current-LTS full verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      TEST_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}-java25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+      - name: Validate immutable workflow dependencies
+        run: python3 .github/scripts/validate_workflow_pins.py
+      - name: Verify checksum-pinned Maven wrapper
+        run: ./mvnw -v
+      - name: Run full lifecycle including local HTTP and PostgreSQL integration contracts
         run: ./mvnw -B -ntp verify
-      - name: Publish CI observability summary
+      - name: Validate semantic Surefire and Failsafe evidence
+        run: python3 .github/scripts/validate_maven_evidence.py --surefire-min 14 --failsafe-min 1
+      - name: Publish current-LTS observability summary
         if: always()
         env:
           JOB_STATUS: ${{ job.status }}
@@ -49,26 +96,43 @@ jobs:
             --arg status "$JOB_STATUS" \
             --arg sha "$GITHUB_SHA" \
             --arg ref "$GITHUB_REF" \
-            --arg java "${{ matrix.java }}" \
-            '{schemaVersion:1,framework:"restassured-junit",runId:$runId,dimension:{java:$java,target:"local-wiremock"},status:$status,sha:$sha,ref:$ref}' \
-            > "reports/ci-observability-java-${{ matrix.java }}.json"
+            '{schemaVersion:1,framework:"restassured-junit",runId:$runId,dimension:{java:"25",target:"local-wiremock+postgresql"},status:$status,sha:$sha,ref:$ref}' \
+            > reports/ci-observability-java-25.json
           {
-            echo "### REST Assured / JUnit · Java ${{ matrix.java }}"
+            echo '### REST Assured · Java 25 current-LTS full verify'
             echo
             echo "- Run ID: \`${TEST_RUN_ID}\`"
             echo "- Job status: \`${JOB_STATUS}\`"
             echo '- Maven: `3.9.16` via checksum-pinned Wrapper 3.3.4'
             echo '- API target: repository-owned dynamic-port WireMock fixture'
-            echo '- Evidence: Surefire/Failsafe reports + request correlation diagnostics + CI observability envelope'
-          } | tee "reports/ci-summary-java-${{ matrix.java }}.md" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload Maven test evidence
+            echo '- Persistence: Testcontainers 1.21.4 + PostgreSQL 16.15'
+            echo '- Evidence: at least 14 executed Surefire tests + 1 executed Failsafe test, zero failures/errors/skips'
+          } | tee reports/ci-summary-java-25.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload current-LTS evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: restassured-java-${{ matrix.java }}-reports
+          name: restassured-java25-full-evidence
           path: |
             reports/
             target/surefire-reports/
             target/failsafe-reports/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
+
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [compatibility-fast, current-lts-full-verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate required CI jobs
+        env:
+          COMPATIBILITY: ${{ needs.compatibility-fast.result }}
+          CURRENT_LTS: ${{ needs.current-lts-full-verify.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$COMPATIBILITY" == "success" ]] || { echo "compatibility-fast=$COMPATIBILITY"; exit 1; }
+          [[ "$CURRENT_LTS" == "success" ]] || { echo "current-lts-full-verify=$CURRENT_LTS"; exit 1; }
