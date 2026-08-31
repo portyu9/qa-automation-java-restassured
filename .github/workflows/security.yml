@@ -77,7 +77,7 @@ jobs:
           summary="reports/security/summary.md"
           if [[ ! -s "$report" ]]; then
             printf '### Security gate\n\nTrivy did not produce a report. Inspect the scan step for setup/runtime failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            exit 1
           fi
           vulnerabilities=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
           misconfigurations=$(jq '[.Results[]? | .Misconfigurations[]?] | length' "$report")
@@ -101,7 +101,7 @@ jobs:
         with:
           name: trivy-security-evidence-${{ github.run_id }}
           path: reports/security/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
 
   dependency-review:
@@ -145,3 +145,22 @@ jobs:
       - name: Confirm repository-wide fallback gate
         if: steps.dependency-graph.outputs.available != 'true'
         run: echo 'Dependency Review service unavailable; Trivy remains a required independent job in this workflow.'
+
+  security-gate:
+    name: security-gate
+    if: always()
+    needs: [codeql, trivy, dependency-review]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate security jobs
+        env:
+          CODEQL: ${{ needs.codeql.result }}
+          TRIVY: ${{ needs.trivy.result }}
+          DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CODEQL" == "success" || "$CODEQL" == "skipped" ]] || { echo "codeql=$CODEQL"; exit 1; }
+          [[ "$TRIVY" == "success" ]] || { echo "trivy=$TRIVY"; exit 1; }
+          [[ "$DEPENDENCY_REVIEW" == "success" || "$DEPENDENCY_REVIEW" == "skipped" ]] || { echo "dependency-review=$DEPENDENCY_REVIEW"; exit 1; }
