@@ -12,10 +12,10 @@ The suite separates fast API/framework contracts from environment-heavy persiste
 | API behavior | Surefire `test` | Dynamic-port WireMock | Status, protocol, schema, semantics |
 | Native protocol capability | Surefire `test` | Dynamic-port WireMock | Query/path params, extraction, filters, cookies |
 | HTTP policy/error behavior | Surefire `test` | Dynamic-port WireMock | Headers, correlation, diagnostics/telemetry |
-| Database integration | Failsafe `verify` | Testcontainers PostgreSQL | Persistence/integration behavior |
+| Database integration | Failsafe `verify` | Testcontainers 2 + PostgreSQL 16.15 | Persistence/integration behavior |
 | External API integration | Explicit/manual | Configured `TEST_BASE_URL` | Environment/provider behavior |
 
-Fast CI runs on Java 17 and 21. Full `mvn verify` runs on Java 17 in primary CI and Java 21 in extended CI, keeping Surefire/Failsafe ownership clear while covering the supported runtime range.
+Fast CI runs on Java 17, 21, and 25. Full `mvn verify` runs on Java 17 in primary CI and Java 25 in extended CI. Java 17 remains the minimum baseline, Java 21 preserves previous-LTS compatibility, and Java 25 qualifies the current LTS without multiplying the expensive container lifecycle across every runtime lane.
 
 ## Deterministic API target policy
 
@@ -94,18 +94,28 @@ Mutating operations require an explicit idempotency contract before retry can be
 
 Integration tests belong under the Failsafe naming/lifecycle convention. They should create isolated disposable state and rely on Testcontainers lifecycle rather than shared developer services.
 
-A database-container startup failure is an integration-infrastructure failure, not an API assertion failure; Surefire/Failsafe report separation helps preserve that classification.
+The PostgreSQL integration uses the Testcontainers 2 PostgreSQL module/namespace and an exact `postgres:16.15-alpine` fixture image. Pinning the maintained PostgreSQL 16 minor keeps a database-version change attributable to a repository change rather than a mutable Docker tag. A database-container startup failure is an integration-infrastructure failure, not an API assertion failure; Surefire/Failsafe report separation helps preserve that classification.
+
+## Security topology
+
+Security controls prove different things and remain independent:
+
+- **CodeQL** compiles/analyzes the Java test framework with the `security-extended` query suite;
+- **Dependency Review** evaluates dependency changes on pull requests when GitHub Dependency graph data is available;
+- **Trivy** scans the repository filesystem for fixed HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfigurations, and committed-secret findings.
+
+If GitHub Dependency graph is unavailable, the workflow says that change-aware review did not run and retains Trivy as an independent whole-repository gate. It does not present the fallback as equivalent to dependency-diff analysis.
 
 ## CI topology
 
 The CI matrix proves distinct properties:
 
-- Java 17 and 21 can compile and execute the deterministic fast API/framework surface;
+- Java 17, 21, and 25 can compile and execute the deterministic fast API/framework surface;
 - Java 17 can complete the full primary `verify` lifecycle;
-- Java 21 can complete the full extended `verify` lifecycle;
+- Java 25 can complete the full extended `verify` lifecycle, including Testcontainers/PostgreSQL;
 - neither API gate depends on public DNS, TLS, third-party data, rate limits, or uptime.
 
-JUnit/Surefire/Failsafe reports are retained for attribution. CI observability identifies the API target class as `local-wiremock`. Maven Enforcer fails unsupported Java/Maven environments before tests begin. Repository security is a separate Trivy gate covering vulnerability, misconfiguration, and committed-secret findings.
+JUnit/Surefire/Failsafe reports are retained for attribution. CI observability identifies the API target class as `local-wiremock`. Maven Enforcer fails unsupported Java/Maven environments before tests begin. Repository security remains separately attributable through CodeQL, graph-aware Dependency Review, and Trivy.
 
 ## Failure classification
 
@@ -119,6 +129,9 @@ JUnit/Surefire/Failsafe reports are retained for attribution. CI observability i
 | Request diagnostics transport error | REST Assured/HTTP transport context |
 | Telemetry capacity/observation assertion | Structural telemetry policy |
 | Failsafe/container | Integration environment/lifecycle |
+| CodeQL | Source-level security finding or analysis/build failure |
+| Dependency Review | Newly introduced dependency risk or unavailable graph-backed diff analysis |
+| Trivy | Repository dependency/configuration/secret exposure |
 | External-target-only failure | Environment/provider integration |
 
 A broad `.log().all()` response dump should not be the default answer to ambiguity. Add the smallest evidence required to classify the failure.
@@ -128,12 +141,14 @@ A broad `.log().all()` response dump should not be the default answer to ambigui
 A Java API/framework change is ready when:
 
 - Maven Enforcer/build pass;
-- fast tests pass on Java 17 and 21;
+- fast tests pass on Java 17, 21, and 25;
 - constructor and environment configuration-negative contracts pass;
 - deterministic WireMock HTTP/schema/semantic contracts pass;
 - native query/path/extraction/cookie/filter capability contracts pass;
 - telemetry remains bounded and payload-safe;
-- full `mvn verify` passes on both covered Java generations when integration behavior is in scope;
+- full `mvn verify` passes on Java 17 and Java 25 when integration behavior is in scope;
+- Testcontainers/PostgreSQL lifecycle remains deterministic against the explicit fixture image;
+- CodeQL and Trivy pass, and Dependency Review passes when graph-backed diff analysis is available;
 - required CI has no public API dependency;
 - automatic diagnostics remain payload-safe;
 - changes to shared request/target/lifecycle policy are documented and covered by framework tests.
