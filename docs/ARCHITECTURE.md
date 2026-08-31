@@ -21,8 +21,8 @@ flowchart LR
     EXT[Explicit external integration] --> CFG
     CFG --> API[Configured external API]
     T --> S[JSON Schemas]
-    DB[DB integration tests] --> TC[Testcontainers]
-    TC --> PG[(PostgreSQL)]
+    DB[DB integration tests] --> TC[Testcontainers 2]
+    TC --> PG[(PostgreSQL 16.15)]
 ```
 
 Framework code should add domain or cross-cutting policy, not wrap every REST Assured operation in a second generic API.
@@ -133,7 +133,7 @@ Collection and single-resource responses use separate JSON Schema artifacts. Thi
 
 Schema assertions are paired with semantic assertions. Shape validation cannot prove that the returned `id` matches the requested resource.
 
-## Maven lifecycle
+## Maven lifecycle and runtime policy
 
 Surefire owns fast `*Test` execution and excludes `*IntegrationTest`. Failsafe owns integration tests during `verify`.
 
@@ -142,11 +142,27 @@ This creates a predictable split:
 - `mvn test` / fast profile → framework/API/WireMock fast tests;
 - `mvn verify` → full lifecycle including PostgreSQL integration.
 
-Maven Enforcer establishes Java/Maven runtime floors before test execution. CI jobs are additionally bounded by GitHub Actions timeouts so a stuck container/network dependency cannot consume runner capacity indefinitely.
+Maven Enforcer establishes Java/Maven runtime floors before test execution. CI qualifies Java 17 as the supported baseline, Java 21 as previous-LTS compatibility, and Java 25 as current-LTS compatibility. Fast deterministic contracts execute on all three; full integration lifecycle coverage executes on Java 17 and Java 25. CI jobs are additionally bounded by GitHub Actions timeouts so a stuck container/network dependency cannot consume runner capacity indefinitely.
 
 ## Database integration
 
-Database integration tests use isolated Testcontainers PostgreSQL infrastructure where real dialect, schema, transaction, or JDBC behavior is material. Container lifecycle belongs to the integration layer, not shared API fast tests. Integration failures remain distinguishable from REST/API assertion failures through Maven's Surefire/Failsafe reports.
+Database integration tests use isolated Testcontainers PostgreSQL infrastructure where real dialect, schema, transaction, or JDBC behavior is material. The repository uses the Testcontainers 2 PostgreSQL module (`org.testcontainers:testcontainers-postgresql`) and relocated Java package (`org.testcontainers.postgresql`). The fixture image is pinned to `postgres:16.15-alpine`, keeping PostgreSQL minor changes attributable to explicit repository changes rather than a mutable `16-alpine` tag.
+
+Container lifecycle belongs to the integration layer, not shared API fast tests. Integration failures remain distinguishable from REST/API assertion failures through Maven's Surefire/Failsafe reports.
+
+## Security boundary
+
+Repository security is deliberately layered:
+
+- CodeQL performs source-level Java analysis with the extended security query suite and an explicit Maven test-compilation build;
+- pull-request Dependency Review performs graph-backed change analysis when GitHub Dependency graph data is available;
+- Trivy independently scans dependency manifests, supported configuration, and committed secret material at HIGH/CRITICAL policy thresholds.
+
+The Dependency Review availability probe exists because a whole-repository filesystem scanner is not equivalent to change-aware dependency analysis. If graph data is unavailable, that limitation is surfaced explicitly while Trivy remains an independent gate.
+
+## Supply-chain ownership
+
+Dependabot owns ordinary Maven and GitHub Actions update proposals while Maven Wrapper version/checksum policy is repository-owned. Package-coordinate or Java-package migrations that cannot be inferred from the existing dependency identity must be handled as explicit migrations with compile/integration evidence. Testcontainers 2 is one such migration: the PostgreSQL artifact and package names changed, so remaining on the old coordinate cannot be interpreted as proof that the old major is current.
 
 ## Failure-domain separation
 
@@ -160,6 +176,10 @@ Database integration tests use isolated Testcontainers PostgreSQL infrastructure
 | Status/schema/semantic mismatch | API contract |
 | PostgreSQL container/runtime failure | Integration infrastructure |
 | SQL/transaction assertion | Persistence contract |
+| Java-version-only failure | Runtime compatibility |
+| CodeQL analysis/build failure | Source-security boundary |
+| Dependency Review finding/unavailability | Dependency-change boundary |
+| Trivy finding | Repository dependency/configuration/secret boundary |
 
 ## Extension rules
 
@@ -175,4 +195,6 @@ New framework behavior should:
 8. pair schemas with semantic assertions;
 9. preserve Surefire/Failsafe separation;
 10. require explicit configuration for external API integration;
-11. add framework-contract tests for new configuration/policy invariants.
+11. pin integration-container versions when version changes are materially attributable;
+12. treat renamed dependency coordinates/packages as explicit migrations rather than invisible automation gaps;
+13. add framework-contract tests for new configuration/policy invariants.
