@@ -35,9 +35,9 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 | Protocol composition | Path/query parameters, specs, extraction, cookies, bounded telemetry | Native REST Assured filters/specs | JUnit/Surefire |
 | HTTP contract | Shared headers/correlation/error visibility | WireMock dynamic port | JUnit/Surefire |
 | External API | Provider/environment behavior | Explicit `TEST_BASE_URL` | Intentional integration signal |
-| Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers PostgreSQL | Failsafe reports |
-| Compatibility | Runtime/toolchain compatibility | Java 17 + 21; Maven 3.9.16 Wrapper | Matrix reports |
-| Security | Dependency/configuration exposure | Trivy filesystem scan | JSON + Markdown findings |
+| Persistence | PostgreSQL driver/schema/transaction behavior | Testcontainers 2 + PostgreSQL 16.15 | Failsafe reports |
+| Compatibility | Runtime/toolchain compatibility | Java 17 + 21 + 25; Maven 3.9.16 Wrapper | Matrix reports |
+| Security | Source, dependency-change, dependency/configuration, and secret exposure | CodeQL + Dependency Review + Trivy | Code scanning + workflow evidence |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
 
 ## Architecture
@@ -83,11 +83,11 @@ flowchart TD
 | Stateful HTTP | REST Assured `CookieFilter` is scoped to scenarios that intentionally require cookie persistence. |
 | Assertion depth | Protocol, structure, semantics, and error behavior are independent contracts. |
 | HTTP simulation | WireMock is used where transport-visible behavior is material—not as a universal mock. |
-| Persistence | Testcontainers is used only when PostgreSQL semantics matter. |
+| Persistence | Testcontainers 2 owns the PostgreSQL integration boundary; the fixture image is explicitly pinned to `postgres:16.15-alpine`. |
 | Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest`. |
 | Build toolchain | Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256. |
-| Compatibility | Java 17/21 fast validation plus full lifecycle coverage. |
-| CI safety | Read-only permissions, concurrency cancellation, bounded jobs. |
+| Compatibility | Java 17 baseline, Java 21 previous-LTS, and Java 25 current-LTS fast qualification; full lifecycle on Java 17 and 25. |
+| CI safety | Read-only default permissions, least-privilege security-job permissions, concurrency cancellation, bounded jobs. |
 
 ## Boundary decision guide
 
@@ -174,6 +174,8 @@ The external base URI must be absolute HTTP(S), have a hostname, and contain no 
 
 Maven is not merely a command launcher; its lifecycle is part of test architecture. Surefire and Failsafe separate fast verification from integration verification, while Enforcer rejects unsupported Java/Maven environments before meaningful test work begins. Repository and CI execution use the checksum-pinned Maven Wrapper so the Maven executable itself is version-controlled policy rather than an ambient runner dependency.
 
+CI treats runtime qualification as separate evidence: Java 17 remains the minimum supported baseline, Java 21 preserves previous-LTS compatibility, and Java 25 exercises the current LTS. Fast deterministic contracts run on all three. Full `verify` runs on Java 17 in primary CI and Java 25 in extended CI so both ends of the supported runtime policy execute the PostgreSQL integration boundary.
+
 Do not replace first-class lifecycle ownership with ad-hoc shell filtering. A test's name and phase communicate expected infrastructure cost and failure domain.
 
 ## Shared request policy
@@ -217,14 +219,16 @@ WireMock stubs the **service boundary**, not REST Assured itself. This preserves
 
 ## PostgreSQL integration boundary
 
-`PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only when SQL dialect, driver, schema, or transaction semantics are material.
+`PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only when SQL dialect, driver, schema, or transaction semantics are material. The integration module uses the Testcontainers 2 PostgreSQL coordinate/namespace and an explicit `postgres:16.15-alpine` image so a future mutable `16-alpine` tag cannot silently change the database minor during an otherwise unchanged framework run.
 
 > [!TIP]
 > A container is not a realism badge. It is justified when real external-system semantics are part of the requirement and should be omitted when they are not.
 
 ## Evidence, CI, and security
 
-Primary CI runs deterministic API/framework tests across Java 17/21 and full verification on the primary lifecycle through the checksum-pinned Maven Wrapper. Extended CI adds a complete Java 21 lifecycle signal through the same wrapper. Security and documentation gates remain independent.
+Primary CI runs deterministic API/framework tests across Java 17/21/25 and full verification on Java 17 through the checksum-pinned Maven Wrapper. Extended CI runs the complete Java 25 lifecycle, including the Testcontainers/PostgreSQL boundary. Security and documentation gates remain independent.
+
+Security is intentionally layered rather than represented by one scanner. CodeQL analyzes Java source with the extended security query suite; pull-request Dependency Review performs change-aware dependency analysis when GitHub Dependency graph data is available; Trivy independently scans the repository filesystem for fixed HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfiguration findings, and committed-secret findings. When Dependency graph is unavailable, the workflow states that the diff-aware control did not run instead of treating Trivy as equivalent.
 
 Failure diagnostics and protocol telemetry are deliberately bounded. Bodies, authorization values, cookies, full URLs, and query strings are excluded from automatic shared evidence.
 
@@ -239,7 +243,7 @@ Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execut
 - Maven-wrapper changes require an intentional version/checksum update and full lifecycle verification;
 - dependency PRs must clear Enforcer, compile, Surefire/Failsafe, compatibility, security, and docs gates as applicable.
 
-Dependabot proposes updates; Maven lifecycle evidence and release-impact review decide mergeability.
+Dependabot proposes updates for dependencies whose package coordinates remain stable. Ecosystem migrations that rename coordinates or Java packages—such as the Testcontainers 2 PostgreSQL module move to `org.testcontainers:testcontainers-postgresql` and `org.testcontainers.postgresql`—require an intentional migration with compilation and integration evidence rather than pretending an absent bot PR means the old major is current. Maven lifecycle evidence and release-impact review decide mergeability.
 
 ## Failure triage
 
@@ -255,11 +259,14 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 | Schema failure | Structural compatibility |
 | Semantic failure | Wrong resource/business value |
 | Header/correlation failure | Shared request policy |
-| Testcontainers startup | Docker/infrastructure |
+| Testcontainers startup | Docker/container integration infrastructure |
 | PostgreSQL assertion | DB integration semantics |
 | Java-version-only failure | Runtime compatibility |
 | External-target-only failure | Environment/provider integration |
-| Security/docs | Independent repository governance |
+| CodeQL | Source-level security query finding or analysis/build failure |
+| Dependency Review | Newly introduced dependency risk or unavailable dependency-graph service |
+| Trivy | Repository dependency/configuration/secret exposure |
+| Docs | Documentation/governance contract |
 
 ## Explicit anti-patterns
 
@@ -271,6 +278,7 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 - schema validation as the only correctness assertion;
 - static/shared ports for deterministic fixtures;
 - Testcontainers where database semantics are irrelevant;
+- floating container tags where database-version changes should remain attributable;
 - arbitrary body/auth/query/cookie logging in shared filters;
 - mixing integration tests into the fast phase through shell filtering;
 - expanding retries to hide provider or infrastructure failures.
@@ -281,4 +289,4 @@ Dependabot proposes updates; Maven lifecycle evidence and release-impact review 
 - [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) — assertion depth, test layers, compatibility, integration, and exit criteria.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — change-quality expectations.
 
-A strong REST Assured framework makes the failing boundary obvious: **build/runtime policy, HTTP protocol/composition/state, schema, semantics, transport policy, persistence integration, compatibility, or explicit provider environment**.
+A strong REST Assured framework makes the failing boundary obvious: **build/runtime policy, HTTP protocol/composition/state, schema, semantics, transport policy, persistence integration, compatibility, security control, or explicit provider environment**.
