@@ -2,138 +2,188 @@
 
 ## Design objective
 
-The framework keeps REST Assured fluent request/assertion APIs visible while centralizing shared request policy, validated runtime configuration, request correlation, schema artifacts, deterministic HTTP fixture ownership, bounded structural telemetry, and integration-test lifecycle.
+The framework keeps REST Assured native while centralizing the policies that should not be rewritten in every test: validated target configuration, reusable request/response specifications, bounded diagnostics, correlation, deterministic provider fixtures, Maven lifecycle ownership, persistence isolation, runtime qualification, and semantic CI evidence.
+
+The architecture is deliberately layered. A test should fail at the cheapest boundary capable of proving the requirement, and the resulting evidence should make that boundary obvious.
 
 ```mermaid
 flowchart LR
-    T[JUnit tests] --> C[PostsApiClient]
-    T --> NATIVE[Native request/path/query/extraction APIs]
-    C --> SPEC[ApiSpecs]
-    SPEC --> CFG[TestConfig]
-    SPEC --> F[RequestDiagnosticsFilter]
-    T --> TEL[ContractTelemetryFilter]
-    T --> COOKIE[CookieFilter]
-    C --> RA[REST Assured]
-    NATIVE --> RA
-    TEL --> RA
-    COOKIE --> RA
-    RA --> WM[Repository-owned WireMock fixture]
-    EXT[Explicit external integration] --> CFG
-    CFG --> API[Configured external API]
-    T --> S[JSON Schemas]
-    DB[DB integration tests] --> TC[Testcontainers]
+    JUNIT[JUnit contracts] --> CLIENT[PostsApiClient]
+    JUNIT --> NATIVE[REST Assured capability contracts]
+    CLIENT --> SPECS[ApiSpecs]
+    NATIVE --> SPECS
+    SPECS --> CFG[TestConfig]
+    SPECS --> DIAG[RequestDiagnosticsFilter]
+    NATIVE --> TELE[ContractTelemetryFilter]
+    NATIVE --> COOKIE[CookieFilter]
+    SPECS --> RA[REST Assured]
+    RA --> WM[WireMock dynamic-port fixture]
+
+    DB[PostgresIntegrationTest] --> TC[Testcontainers 1.21.4]
     TC --> PG[(PostgreSQL 16.15)]
+
+    WM --> SURE[Surefire reports]
+    PG --> FAIL[Failsafe reports]
+    SURE --> EVIDENCE[Maven evidence validator]
+    FAIL --> EVIDENCE
 ```
 
-Framework code should add domain or cross-cutting policy, not wrap every REST Assured operation in a second generic API.
+## Configuration boundary
 
-## Deterministic HTTP target model
+`TestConfig` owns the target URI, connection/read budgets, and run identity. Environment parsing occurs at the edge through `TestConfig.fromEnvironment()`; core tests can construct configuration directly without mutating process-global state.
 
-Required Maven and GitHub Actions validation does not depend on a public API. `PostsApiFixture` owns a dynamic-port loopback `WireMockServer` and provides the `TestConfig` consumed by REST Assured acceptance tests.
+External targets must:
 
-The fixture defines only the HTTP behavior required to prove the client/framework contract. REST Assured still performs real HTTP requests; JSON Schema and semantic assertions remain in the tests. WireMock supplies deterministic transport availability, not a substitute assertion engine.
+- use HTTP or HTTPS;
+- be absolute and have a hostname;
+- contain no embedded credentials;
+- contain no query string or fragment;
+- reject explicit port `0` or invalid port ranges;
+- use positive timeout budgets;
+- use bounded correlation identifiers.
 
-Dynamic ports avoid fixed-port contention across parallel jobs and local processes. Each test owns and closes its fixture explicitly.
+Configuration failures happen before request construction. This keeps malformed environment state out of transport-level retry or timeout diagnosis.
 
-Environment-driven execution is a separate integration path. `TestConfig.fromEnvironment()` requires `TEST_BASE_URL`; there is no silent public fallback. A missing target is therefore a configuration error before transport rather than an accidental request to a third-party service.
+## Request-policy boundary
 
-## Configuration invariants
+`ApiSpecs.request(config)` centralizes durable cross-cutting HTTP policy:
 
-`TestConfig` is an immutable Java record whose compact constructor enforces invariants for every construction path, not only `fromEnvironment()`.
+- base URI;
+- JSON `Accept` contract;
+- run correlation;
+- per-request correlation;
+- connection/read budgets;
+- bounded failure diagnostics.
 
-The base URI must be non-null and absolute, use HTTP or HTTPS, contain a hostname, use an explicit port only within 1–65535, contain no URL credentials/query/fragment, and retain optional path prefixes. Connect/read timeouts must be positive. Run IDs are trimmed and constrained because they become request-correlation metadata.
+This is intentionally narrower than a generic API wrapper. Endpoint-specific paths, parameters, status expectations, schemas, and semantic assertions remain visible in the REST Assured DSL.
 
-The environment loader accepts a read-only lookup function for contract tests so negative configuration behavior can be proved without mutating process-global environment state.
+## Native REST Assured boundary
 
-## Shared request policy
+`RestAssuredCapabilitiesTest` proves that framework policy composes with the library rather than replacing it. The suite keeps first-class coverage for:
 
-`ApiSpecs.request(config)` creates the shared `RequestSpecification` with validated base URI, JSON accept policy, run-level correlation, bounded connect/socket timeouts, and `RequestDiagnosticsFilter`. Endpoint-specific status and semantic assertions stay with tests/client flows.
+- path and query parameters;
+- shared request/response specifications;
+- filters;
+- extraction;
+- `CookieFilter` state;
+- status/header/body assertions;
+- bounded telemetry.
 
-## Native protocol composition
+A framework abstraction is useful when it owns policy. Renaming `given()`, `.get()`, `.then()`, or `.extract()` would add indirection without adding quality.
 
-Capability tests intentionally keep REST Assured's own request/response model visible. They prove that the shared specification composes with query/path parameters, response-header/body assertions, response extraction, custom filters, and scoped `CookieFilter` state. New helpers are justified only when they enforce a durable cross-cutting invariant.
+## Deterministic HTTP boundary
 
-## Run-level vs request-level correlation
+`PostsApiFixture` provisions WireMock on a dynamic loopback port. The normal `PostsApiClient` and REST Assured stack execute real HTTP against that fixture.
 
-`X-Test-Run-Id` groups requests produced by one execution; `X-Test-Request-Id` is generated for each HTTP exchange by `RequestDiagnosticsFilter`. Keeping them separate makes one slow/failing call traceable inside a larger run.
+This preserves transport-visible behavior—serialization, headers, status, cookies, request specifications, filters, extraction—while excluding public DNS, TLS, third-party data, rate limits, and service availability from required CI.
 
-## Failure diagnostics vs contract telemetry
+WireMock is therefore a provider-boundary simulator, not a mock of REST Assured.
 
-`RequestDiagnosticsFilter` emits failure-focused structural context only. Request/response bodies, authorization headers, cookies, raw URLs, and query strings are intentionally not automatically logged.
+## Diagnostics and telemetry
 
-`ContractTelemetryFilter` is opt-in and retains only method, sanitized URI path, status code, and duration. Its recent-observation window is bounded and synchronized, preventing a long or data-driven suite from turning structural telemetry into an unbounded memory sink.
+`RequestDiagnosticsFilter` and `ContractTelemetryFilter` have different ownership:
 
-## Stateful HTTP behavior
+- diagnostics explain a failed/transport request;
+- telemetry records a bounded recent window of protocol observations.
 
-`CookieFilter` is created by the test/flow that owns session state and is never installed as a global singleton. This makes cookie replay explicit and prevents authentication/session state from leaking between unrelated tests.
+Shared evidence is intentionally data-minimized. It can retain method, sanitized path, status, duration, request identity, and error class, but not authorization values, cookies, query strings, or request/response bodies.
 
-## Client boundary
+An individual test may inspect a body to prove behavior without making that body suitable for automatic global logging.
 
-`PostsApiClient` exposes domain-oriented operations while target ownership remains in `TestConfig`. Native REST Assured `Response` objects remain visible for expressive assertions. Operation-specific input validation happens before transport.
+## Persistence boundary
 
-## Schema ownership
+`PostgresIntegrationTest` is a Failsafe integration contract. It uses Testcontainers only because JDBC/driver/PostgreSQL behavior is material to the requirement.
 
-Collection and single-resource responses use separate JSON Schema artifacts. Schema assertions are paired with semantic assertions because structural validity cannot prove resource identity or business correctness.
+The integration owns:
 
-## Maven lifecycle and runtime policy
+- a pinned `postgres:16.15-alpine` image;
+- an isolated container lifecycle;
+- a temporary test-owned table;
+- generated identity retrieval;
+- parameterized insert/select behavior;
+- deterministic cleanup through connection/container lifecycle.
 
-Surefire owns fast `*Test` execution and excludes `*IntegrationTest`; Failsafe owns integration tests during `verify`. Maven Enforcer establishes Java/Maven runtime floors before test execution.
+The repository deliberately remains on Testcontainers 1.21.4. The prior 2.0.5 migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and the 2.x module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
 
-CI qualifies Java 17 as the supported baseline, Java 21 as previous-LTS compatibility, and Java 25 as current-LTS compatibility. Fast deterministic contracts execute on all three; full integration lifecycle coverage executes on Java 17 and Java 25. Jobs are additionally bounded by GitHub Actions timeouts.
+## Maven lifecycle boundary
 
-## Database integration
+Surefire owns fast API/framework contracts. Failsafe owns `*IntegrationTest` and the PostgreSQL container boundary.
 
-Database integration tests use isolated Testcontainers PostgreSQL infrastructure where real dialect, schema, transaction, or JDBC behavior is material. The database image is explicitly pinned to `postgres:16.15-alpine` so a PostgreSQL minor change remains attributable to a repository change.
+The project compiles with Java release 17 while runtime qualification is explicit:
 
-The accepted integration-library line remains Testcontainers 1.21.4. An attempted 2.0.5 migration compiled on all qualified Java runtimes but failed at Docker-client initialization because the assembled runtime exposed an incompatible Jackson annotation version. The same upstream 2.0.5 release also has reported security concerns in its shaded Jackson layer. A future 2.x migration must therefore clear both assembled-runtime integration tests and upstream dependency-security review; local overrides that merely force the process past initialization are not an acceptable substitute.
+- Java 25 current LTS: complete primary `verify` lifecycle;
+- Java 21: fast compatibility;
+- Java 17 minimum runtime: fast compatibility in primary CI and full `verify` in extended CI.
 
-The Testcontainers 2 PostgreSQL artifact/package rename also means Dependabot cannot represent this as an ordinary in-place version update. This migration is intentionally owned as an architectural change rather than inferred from an absent bot PR.
+Maven Enforcer bounds Java to `[17,26)` and Maven to `[3.9,4)`. This prevents an unqualified Java 26 or Maven 4 environment from being interpreted as supported merely because it happens to compile.
+
+The Maven Wrapper is part of provenance. Wrapper 3.3.4 points to Maven 3.9.16 and a pinned distribution SHA-256.
+
+## Evidence boundary
+
+Maven process success and artifact upload are not treated as sufficient evidence of suite execution.
+
+`.github/scripts/validate_maven_evidence.py` parses Maven XML and enforces:
+
+- Surefire reports exist;
+- at least 14 fast tests actually executed;
+- Failsafe reports exist when a full lifecycle is expected;
+- at least 1 integration test actually executed in full lifecycle gates;
+- zero failures;
+- zero errors;
+- zero skipped tests.
+
+The floors are based on the current intended suite. They protect against test-discovery regressions, accidental naming changes, skipped integration infrastructure, or CI configuration that uploads an empty report directory.
+
+Artifacts use `if-no-files-found: error`, so evidence disappearance is itself a failure.
+
+## Runtime qualification model
+
+Runtime matrices should change one meaningful risk dimension at a time.
+
+The primary contract is Java 25 full verification because current LTS should exercise the entire supported framework, including Testcontainers. Java 17 is the minimum compatibility boundary and receives a full extended lifecycle. Java 21 provides the intermediate LTS fast-compatibility signal.
+
+This gives three useful failure interpretations:
+
+- Java 17/21 fast-only failure → compatibility/API assumption;
+- Java 25 full-only failure → current-LTS or integration interaction;
+- Java 17 extended-full-only failure → minimum-runtime persistence interaction.
 
 ## Security boundary
 
-Repository security is deliberately layered:
+Security controls remain independent:
 
-- CodeQL performs source-level Java analysis with the extended security query suite and an explicit Maven test-compilation build;
-- pull-request Dependency Review performs graph-backed change analysis when GitHub Dependency graph data is available;
-- Trivy independently scans dependency manifests, supported configuration, and committed secret material at HIGH/CRITICAL policy thresholds.
+- CodeQL `security-extended` analyzes Java source/data flow after a controlled Maven compilation;
+- Trivy scans repository dependencies, supported configuration, and committed secret material at HIGH/CRITICAL severity;
+- Dependency Review analyzes newly introduced dependency changes when GitHub Dependency graph is available;
+- Maven Wrapper checksum validation protects build-tool provenance;
+- `.github/scripts/validate_workflow_pins.py` rejects mutable external Action references.
 
-The Dependency Review availability probe exists because a whole-repository filesystem scanner is not equivalent to change-aware dependency analysis. If graph data is unavailable, that limitation is surfaced explicitly while Trivy remains an independent gate. Security review also considers dependency content hidden by shading or repackaging when manifest scanners cannot see it directly.
+Trivy is fail-closed if its expected JSON report is absent. Dependency Review availability is explicit: when GitHub Dependency graph is unavailable, that diff-aware control is recorded as unavailable rather than silently represented by a whole-repository scan.
 
-## Supply-chain ownership
+## Stable workflow interfaces
 
-Dependabot owns ordinary Maven and GitHub Actions update proposals while Maven Wrapper version/checksum policy is repository-owned. Package-coordinate or Java-package migrations that cannot be inferred from the existing dependency identity must be handled explicitly with compilation, integration, and security evidence.
+Internal jobs can evolve without forcing consumers to track matrix-cell names. The stable aggregate conclusions are:
 
-## Failure-domain separation
+- `ci / ci-gate`;
+- `extended / extended-gate`;
+- `security / security-gate`.
 
-| Failure | First owner |
-| --- | --- |
-| Missing/unsafe `TEST_BASE_URL` or run correlation | Configuration |
-| WireMock startup/stub mismatch | Deterministic HTTP fixture |
-| REST Assured transport/filter failure | HTTP framework boundary |
-| Cookie/state mismatch | Test-owned session state |
-| Telemetry capacity/observation mismatch | Structural telemetry helper |
-| Status/schema/semantic mismatch | API contract |
-| PostgreSQL container/runtime failure | Integration infrastructure / assembled dependency runtime |
-| SQL/transaction assertion | Persistence contract |
-| Java-version-only failure | Runtime compatibility |
-| CodeQL analysis/build failure | Source-security boundary |
-| Dependency Review finding/unavailability | Dependency-change boundary |
-| Trivy finding | Repository dependency/configuration/secret boundary |
+Repository rules/settings are separate from these workflow contracts.
 
 ## Extension rules
 
 New framework behavior should:
 
-1. keep required CI on repository-owned deterministic targets;
-2. place universal invariants in constructor/configuration boundaries;
-3. keep shared request policy in `ApiSpecs`;
-4. use REST Assured filters only for genuine cross-cutting behavior;
-5. bound retained filter state and keep automatic diagnostics payload-safe;
-6. scope cookie/session filters to the owning test flow;
-7. store schemas as version-controlled test resources and pair them with semantic assertions;
-8. preserve Surefire/Failsafe separation;
-9. require explicit configuration for external API integration;
-10. pin integration-container versions when version changes are materially attributable;
-11. treat renamed dependency coordinates/packages as explicit migrations rather than invisible automation gaps;
-12. require major integration-library migrations to pass assembled-runtime and security acceptance, not merely compilation;
-13. add framework-contract tests for new configuration/policy invariants.
+1. validate external input before request construction;
+2. preserve native REST Assured request/response semantics;
+3. centralize only durable policy rather than every library call;
+4. prefer dynamic repository-owned HTTP fixtures for required API contracts;
+5. introduce containers only when real external-system semantics matter;
+6. classify deployed-provider behavior separately from framework health;
+7. keep shared diagnostics bounded and payload-free;
+8. keep stateful filters scoped to the smallest scenario that owns the state;
+9. assign expensive integration tests to Failsafe rather than hiding them in fast suites;
+10. update semantic evidence floors when the intended suite deliberately changes;
+11. qualify runtime/toolchain expansion in CI before widening Enforcer ranges;
+12. retain the Testcontainers 1.x boundary until a 2.x runtime migration has complete integration evidence.
