@@ -75,8 +75,8 @@
             <goals><goal>enforce</goal></goals>
             <configuration>
               <rules>
-                <requireJavaVersion><version>[17,)</version></requireJavaVersion>
-                <requireMavenVersion><version>[3.9,)</version></requireMavenVersion>
+                <requireJavaVersion><version>[17,26)</version></requireJavaVersion>
+                <requireMavenVersion><version>[3.9,4)</version></requireMavenVersion>
               </rules>
             </configuration>
           </execution>
