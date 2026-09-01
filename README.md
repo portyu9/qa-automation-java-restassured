@@ -38,7 +38,7 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 | Persistence | JDBC, PostgreSQL dialect, generated identity, owned row behavior | Testcontainers 1.21.4 + PostgreSQL 16.15 | Failsafe XML/text |
 | Runtime compatibility | Bytecode/runtime behavior across supported Java releases | Java 17, 21, 25 + Maven 3.9.16 Wrapper | Matrix/lifecycle reports |
 | Evidence integrity | Intended suites actually executed with clean terminal state | Repository-owned XML validator | Minimum-count + failure/error/skip checks |
-| Security | Java SAST, repository dependency/configuration/secret risk, PR dependency-change risk | CodeQL + Trivy + Dependency Review when available | Code scanning + retained JSON/status |
+| Security | Java SAST, Maven test-dependency risk, repository policy/secret risk, PR dependency-change risk | CodeQL + CycloneDX/Trivy SBOM + repository Trivy + Dependency Review when available | Code scanning + retained SBOM/JSON/status |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
 
 ## Architecture
@@ -69,7 +69,9 @@ flowchart LR
     J21[Java 21 fast compatibility] --> EVIDENCE
 
     CODEQL[CodeQL] --> SG[Security / security-gate]
-    TRIVY[Trivy] --> SG
+    BOM[CycloneDX test-scope SBOM] --> SBOMSCAN[Trivy SBOM vulnerability gate]
+    SBOMSCAN --> SG
+    REPO[Trivy repository policy] --> SG
     DEP[Dependency Review when available] --> SG
     EVIDENCE --> CIG[CI / ci-gate]
 ```
@@ -96,6 +98,8 @@ The architecture deliberately keeps **library capability**, **application/test p
 | Build toolchain | Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256. |
 | Supported Java | Java 17 minimum, Java 21 compatibility, Java 25 current LTS; Enforcer rejects Java 26+ until explicitly qualified. |
 | Supported Maven | Maven 3.9.x only; Enforcer rejects Maven 4 until deliberately qualified. |
+| Jackson alignment | The REST Assured schema-validator transitive graph is normalized with Jackson BOM 2.18.8; retained SBOM evidence proves `jackson-core` and `jackson-databind` resolve to that governed version. |
+| Dependency evidence | CycloneDX 2.9.3 generates a JSON SBOM including Maven test scope; the gate requires governed REST Assured, JUnit, Testcontainers, PostgreSQL, and Jackson components before scanning. |
 | Workflow supply chain | External GitHub Actions are full-SHA pinned and checked by a repository-local validator. |
 | CI safety | Read-only default permissions, least-privilege security permissions, concurrency cancellation, bounded jobs, fail-closed evidence uploads. |
 
@@ -270,7 +274,7 @@ The workflow internals can evolve while external status interfaces remain small 
 
 - `ci / ci-gate` aggregates Java 17/21 fast compatibility and Java 25 current-LTS full verification;
 - `extended / extended-gate` aggregates the Java 17 minimum-runtime full lifecycle;
-- `security / security-gate` aggregates CodeQL, Trivy, and event-applicable Dependency Review/fallback behavior.
+- `security / security-gate` aggregates CodeQL, Maven test-scope SBOM vulnerability scanning, repository Trivy policy scanning, and event-applicable Dependency Review/fallback behavior.
 
 Repository rules/settings are a separate governance layer. The workflows expose stable conclusions without implying that a particular repository rule is configured.
 
@@ -279,14 +283,17 @@ Repository rules/settings are a separate governance layer. The workflows expose 
 Security controls remain independent because they answer different questions:
 
 - **CodeQL `security-extended`** analyzes Java source/data-flow behavior after a controlled test compilation;
-- **Trivy** scans the repository filesystem for fixed HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL configuration findings, and committed-secret findings;
+- **Maven test-dependency SBOM gate** uses pinned CycloneDX Maven plugin 2.9.3 with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with Trivy v0.74.0 for fixed HIGH/CRITICAL vulnerabilities;
+- **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;
 - **Dependency Review** evaluates newly introduced dependency risk on pull requests when GitHub Dependency graph is available;
 - **Maven Wrapper provenance** pins Maven 3.9.16 and verifies its SHA-256 before execution;
 - **workflow pin validation** requires every external GitHub Action reference to be a full immutable commit SHA.
 
-If GitHub Dependency graph is unavailable, the workflow records that limitation. Trivy remains an independent repository-wide gate, but it is not represented as equivalent to change-aware dependency-diff analysis.
+The SBOM gate exists because repository-filesystem scanning alone does not reliably prove the resolved Maven **test** dependency graph. Missing SBOM or Trivy JSON evidence is a failure, and artifact uploads use `if-no-files-found: error`.
 
-Trivy evidence is fail-closed: a missing expected report makes the job fail, and artifact upload refuses an empty evidence set.
+If GitHub Dependency graph is unavailable, the workflow records that limitation. The Maven SBOM vulnerability gate and repository Trivy policy remain independent required controls, but neither is represented as equivalent to change-aware dependency-diff analysis.
+
+The REST Assured 6.0.1 JSON-schema-validator path currently reaches `java-json-tools`, which otherwise selects Jackson 2.11.0. The repository imports **Jackson BOM 2.18.8** so `jackson-core` and `jackson-databind` resolve as one coherent patched family. The SBOM validator requires both components at that governed version and rejects conflicting versions before vulnerability scanning.
 
 ## Dependency maintenance
 
@@ -297,9 +304,9 @@ Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execut
 - major upgrades remain attributable compatibility changes;
 - Actions are executable dependencies and remain immutable-SHA pinned;
 - wrapper changes require deliberate version/checksum changes plus full lifecycle verification;
-- dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, security, and documentation gates as applicable.
+- dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, repository security, and documentation gates as applicable.
 
-Dependabot can update dependencies whose package coordinates remain stable. Migrations that rename modules or Java packages require deliberate code changes. Testcontainers 2 is such a migration and is intentionally not forced through an incompatible automated bump.
+Dependabot can update dependencies whose package coordinates remain stable, including the imported Jackson BOM. Migrations that rename modules or Java packages require deliberate code changes. Testcontainers 2 is such a migration and its major updates are intentionally excluded from automated Dependabot PRs while Testcontainers 1.x minor/patch maintenance remains enabled.
 
 ## Failure triage
 
@@ -313,13 +320,15 @@ Dependabot can update dependencies whose package coordinates remain stable. Migr
 | Surefire evidence-floor failure | Fast-suite discovery, skips, or report-integrity regression |
 | Failsafe evidence-floor failure | Integration discovery/container execution/report regression |
 | WireMock-only failure | HTTP contract/request-policy behavior |
-| JSON Schema failure | Structural compatibility |
+| JSON Schema failure | Structural compatibility or Jackson/schema-validator compatibility regression |
 | Semantic assertion failure | API business/data contract |
 | Cookie-filter failure | Stateful HTTP semantics |
 | PostgreSQL Failsafe failure | Container/driver/SQL/persistence boundary |
 | External-target-only failure | Environment/provider integration first |
 | CodeQL failure | Source-level security signal |
-| Trivy failure | Dependency/configuration/secret security signal |
+| Maven SBOM validation failure | Resolved dependency scope/alignment evidence is missing or drifted |
+| Maven SBOM Trivy failure | Fixed HIGH/CRITICAL vulnerability exists in the resolved test dependency graph |
+| Repository Trivy failure | HIGH/CRITICAL supported configuration finding or committed-secret signal |
 | Dependency Review unavailable | GitHub service limitation; not a synthetic pass for diff-aware analysis |
 | Documentation/workflow-pin failure | Repository governance or executable supply-chain drift |
 
@@ -334,6 +343,8 @@ Dependabot can update dependencies whose package coordinates remain stable. Migr
 - mutable database image tags in deterministic integration gates;
 - treating a passing Maven exit code as proof that the intended test count ran;
 - accepting skipped integration tests as successful persistence evidence;
+- treating repository filesystem scanning as proof of a resolved Maven test graph;
+- overriding one vulnerable Jackson jar without governing the compatible Jackson family;
 - unbounded `Java >=17` or Maven version claims without corresponding CI qualification;
 - forcing ecosystem migrations merely because an update tool can identify a higher version.
 
