@@ -80,10 +80,13 @@ def main() -> int:
 
     with TemporaryDirectory(prefix="maven-evidence-policy-") as temp_dir:
         surefire, _ = populate_clean(Path(temp_dir))
+        # Keep the executed total at four for this class while retaining one skip,
+        # so this case specifically exercises the no-skips policy rather than the
+        # global 14-executed-test floor.
         write_report(
             surefire,
             "com.example.api.RestAssuredCapabilitiesTest",
-            4,
+            5,
             skipped=1,
         )
         require_failure(
