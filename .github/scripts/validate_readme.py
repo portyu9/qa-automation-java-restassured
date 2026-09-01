@@ -19,6 +19,11 @@ MERMAID_ROOTS = (
     "erDiagram", "journey", "gantt", "pie", "mindmap", "timeline",
     "quadrantChart", "xychart",
 )
+STABLE_GATES = {
+    "ci-gate": ROOT / ".github" / "workflows" / "ci.yml",
+    "extended-gate": ROOT / ".github" / "workflows" / "extended.yml",
+    "security-gate": ROOT / ".github" / "workflows" / "security.yml",
+}
 
 
 def fail(message: str, errors: list[str]) -> None:
@@ -74,12 +79,29 @@ def validate_repository_map(text: str, errors: list[str]) -> None:
     if not match:
         fail("README repository map text block is missing", errors)
         return
+    entries = 0
     for line in match.group(1).splitlines():
         entry = re.sub(r"^[│├└─\s]+", "", line.strip())
         if not entry or entry == ".":
             continue
+        entries += 1
         if not entry.endswith("/"):
             fail(f"README repository map must contain directories only; found: {entry}", errors)
+    if entries == 0:
+        fail("README repository map contains no directory entries", errors)
+
+
+def validate_stable_gates(text: str, errors: list[str]) -> None:
+    lower = text.lower()
+    for gate, workflow in STABLE_GATES.items():
+        if not workflow.is_file():
+            fail(f"required workflow is missing for stable gate `{gate}`", errors)
+            continue
+        workflow_text = workflow.read_text(encoding="utf-8")
+        if not re.search(rf"^\s{{2}}{re.escape(gate)}:\s*$", workflow_text, re.MULTILINE):
+            fail(f"workflow does not define stable aggregate job `{gate}`", errors)
+        if gate not in lower:
+            fail(f"README must document stable aggregate job `{gate}`", errors)
 
 
 def main() -> int:
@@ -97,11 +119,9 @@ def main() -> int:
     validate_badge_palette(text, errors)
     validate_mermaid(text, errors)
     validate_repository_map(text, errors)
+    validate_stable_gates(text, errors)
 
     lower = text.lower()
-    for gate in ("`ci / ci-gate`", "`extended / extended-gate`", "`security / security-gate`"):
-        if gate not in lower:
-            fail(f"README must document stable aggregate status {gate}", errors)
     for claim in ("java 25", "java 17", "maven 3.9.16"):
         if claim not in lower:
             fail(f"README must document qualified toolchain claim: {claim}", errors)
@@ -111,7 +131,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("README contract: ok")
+    print("README contract: links, badges, Mermaid, directory-only map, stable gates, and toolchain claims are consistent")
     return 0
 
 
