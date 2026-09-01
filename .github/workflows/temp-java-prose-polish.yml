@@ -1,0 +1,57 @@
+name: polish-versionless-java-prose
+
+on:
+  push:
+    branches: [chore/versionless-docs]
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Polish versionless Java prose
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+            'Prerequisites are a supported Java runtime (**a supported Java runtime**) and a Docker-compatible runtime': 'Prerequisites are a supported Java runtime and a Docker-compatible runtime',
+            '`maven.compiler.release` minimum-runtime policy': 'the configured `maven.compiler.release` minimum-runtime policy',
+            '- **The minimum supported Java runtime** also runs': '- **The minimum supported Java runtime** also runs',
+            'future unqualified Java releases is rejected': 'future unqualified Java releases are rejected',
+            'This is stronger than a broad unbounded `Java >=17` claim.': 'This is stronger than an unbounded minimum-version claim.',
+            'until a safe 2.x migration is demonstrated': 'until a safe future-major migration is demonstrated',
+            'prior prior major-version migration': 'prior major-version migration',
+            'the 2.x PostgreSQL module/package coordinates also change': 'the future-major PostgreSQL module/package coordinates also change',
+            'A future a future Testcontainers major migration': 'A future Testcontainers major migration',
+            'until a 2.x runtime migration has complete integration evidence': 'until a future-major runtime migration has complete integration evidence',
+            'until a 2.x migration proves': 'until a future-major migration proves',
+            '2.x migration': 'future-major migration',
+            '2.x module/package coordinates': 'future-major module/package coordinates',
+            'Testcontainers 1.x': 'the currently qualified Testcontainers major line',
+          }
+          files=[Path('README.md'),*sorted(Path('docs').rglob('*.md'))]
+          for p in files:
+            text=p.read_text(encoding='utf-8')
+            for old,new in replacements.items(): text=text.replace(old,new)
+            p.write_text(text,encoding='utf-8')
+          PY
+          python3 .github/scripts/validate_readme.py
+          if grep -RInE '(Java|Maven|REST Assured|JUnit|WireMock|Testcontainers|PostgreSQL|Jackson|CycloneDX)[^[:cntrl:]]{0,30}([0-9]+\.[0-9]+|[0-9]+\.x|>=?[0-9]+)' README.md docs; then
+            echo 'technology version reference remains in Java documentation' >&2
+            exit 1
+          fi
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/temp-java-prose-polish.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: polish versionless Java wording"
+          git push origin HEAD
