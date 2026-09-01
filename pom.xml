@@ -15,9 +15,27 @@
     <restassured.version>6.0.1</restassured.version>
     <wiremock.version>3.13.2</wiremock.version>
     <testcontainers.version>1.21.4</testcontainers.version>
+    <jackson.version>2.18.8</jackson.version>
     <cyclonedx.maven.version>2.9.3</cyclonedx.maven.version>
     <skipITs>false</skipITs>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!--
+        REST Assured's schema-validator path currently reaches java-json-tools,
+        which otherwise selects Jackson 2.11.0. Keep the Jackson family on a
+        coherent patched 2.x release rather than overriding individual jars.
+      -->
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <dependencies>
     <dependency>
