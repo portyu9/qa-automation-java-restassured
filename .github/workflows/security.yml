@@ -17,6 +17,7 @@ concurrency:
 
 env:
   CYCLONEDX_MAVEN_VERSION: 2.9.3
+  JACKSON_VERSION: 2.18.8
 
 jobs:
   codeql:
@@ -74,18 +75,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports/security/maven
-          configured_version="$(python3 - <<'PY'
+          readarray -t configured_versions < <(python3 - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse('pom.xml').getroot()
           ns = {'m': 'http://maven.apache.org/POM/4.0.0'}
-          value = root.findtext('m:properties/m:cyclonedx.maven.version', namespaces=ns)
-          if not value:
-              raise SystemExit('pom.xml does not pin cyclonedx.maven.version')
-          print(value)
+          for name in ('cyclonedx.maven.version', 'jackson.version'):
+              value = root.findtext(f'm:properties/m:{name}', namespaces=ns)
+              if not value:
+                  raise SystemExit(f'pom.xml does not pin {name}')
+              print(value)
           PY
-          )"
-          [[ "$configured_version" == "$CYCLONEDX_MAVEN_VERSION" ]] || {
-            echo "CycloneDX version mismatch: pom=$configured_version workflow=$CYCLONEDX_MAVEN_VERSION" >&2
+          )
+          [[ "${configured_versions[0]}" == "$CYCLONEDX_MAVEN_VERSION" ]] || {
+            echo "CycloneDX version mismatch: pom=${configured_versions[0]} workflow=$CYCLONEDX_MAVEN_VERSION" >&2
+            exit 1
+          }
+          [[ "${configured_versions[1]}" == "$JACKSON_VERSION" ]] || {
+            echo "Jackson version mismatch: pom=${configured_versions[1]} workflow=$JACKSON_VERSION" >&2
             exit 1
           }
           ./mvnw -B -ntp \
@@ -101,7 +107,7 @@ jobs:
           set -euo pipefail
           bom="reports/security/maven/security-bom.json"
           [[ -s "$bom" ]] || { echo "missing CycloneDX SBOM: $bom" >&2; exit 1; }
-          jq -e '
+          jq -e --arg jackson "$JACKSON_VERSION" '
             (.bomFormat == "CycloneDX")
             and ((.components // []) | type == "array")
             and (((.components // []) | length) > 10)
@@ -109,8 +115,11 @@ jobs:
             and (((.components // []) | map(select(.group == "org.junit.jupiter" and .name == "junit-jupiter")) | length) > 0)
             and (((.components // []) | map(select(.group == "org.testcontainers" and .name == "postgresql")) | length) > 0)
             and (((.components // []) | map(select(.group == "org.postgresql" and .name == "postgresql")) | length) > 0)
+            and (((.components // []) | map(select(.group == "com.fasterxml.jackson.core" and .name == "jackson-core" and .version == $jackson)) | length) > 0)
+            and (((.components // []) | map(select(.group == "com.fasterxml.jackson.core" and .name == "jackson-databind" and .version == $jackson)) | length) > 0)
+            and (((.components // []) | map(select(.group == "com.fasterxml.jackson.core" and (.name == "jackson-core" or .name == "jackson-databind") and .version != $jackson)) | length) == 0)
           ' "$bom" >/dev/null
-          echo "CycloneDX components=$(jq '(.components // []) | length' "$bom")"
+          echo "CycloneDX components=$(jq '(.components // []) | length' "$bom") Jackson=$JACKSON_VERSION"
       - name: Scan test-scope SBOM for HIGH/CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -137,6 +146,7 @@ jobs:
             echo
             echo "- CycloneDX Maven plugin: \`${CYCLONEDX_MAVEN_VERSION}\`"
             echo '- SBOM scope: direct and transitive dependencies including Maven test scope'
+            echo "- Jackson alignment: \`${JACKSON_VERSION}\` via imported BOM"
             echo "- Fixed HIGH/CRITICAL findings: ${findings}"
             echo '- Scanner: Trivy v0.74.0 SBOM mode'
           } >> "$GITHUB_STEP_SUMMARY"
