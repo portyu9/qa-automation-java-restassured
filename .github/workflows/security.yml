@@ -15,10 +15,6 @@ concurrency:
   group: security-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  CYCLONEDX_MAVEN_VERSION: 2.9.3
-  JACKSON_VERSION: 2.18.8
-
 jobs:
   codeql:
     name: CodeQL
@@ -70,11 +66,10 @@ jobs:
         run: python3 .github/scripts/validate_workflow_pins.py
       - name: Verify checksum-pinned Maven wrapper
         run: ./mvnw -v
-      - name: Generate CycloneDX SBOM including test dependencies
+      - name: Resolve governed dependency-evidence versions from pom.xml
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p reports/security/maven
           readarray -t configured_versions < <(python3 - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse('pom.xml').getroot()
@@ -83,17 +78,24 @@ jobs:
               value = root.findtext(f'm:properties/m:{name}', namespaces=ns)
               if not value:
                   raise SystemExit(f'pom.xml does not pin {name}')
-              print(value)
+              print(value.strip())
           PY
           )
-          [[ "${configured_versions[0]}" == "$CYCLONEDX_MAVEN_VERSION" ]] || {
-            echo "CycloneDX version mismatch: pom=${configured_versions[0]} workflow=$CYCLONEDX_MAVEN_VERSION" >&2
-            exit 1
-          }
-          [[ "${configured_versions[1]}" == "$JACKSON_VERSION" ]] || {
-            echo "Jackson version mismatch: pom=${configured_versions[1]} workflow=$JACKSON_VERSION" >&2
-            exit 1
-          }
+          [[ "${#configured_versions[@]}" -eq 2 ]] || { echo 'expected two governed versions' >&2; exit 1; }
+          for version in "${configured_versions[@]}"; do
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo "governed version is not strict numeric SemVer: $version" >&2
+              exit 1
+            }
+          done
+          echo "CYCLONEDX_MAVEN_VERSION=${configured_versions[0]}" >> "$GITHUB_ENV"
+          echo "JACKSON_VERSION=${configured_versions[1]}" >> "$GITHUB_ENV"
+          echo "CycloneDX=${configured_versions[0]} Jackson=${configured_versions[1]}"
+      - name: Generate CycloneDX SBOM including test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/security/maven
           ./mvnw -B -ntp \
             org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom \
             -DincludeTestScope=true \
@@ -144,9 +146,9 @@ jobs:
           {
             echo '### Maven test-dependency vulnerability gate'
             echo
-            echo "- CycloneDX Maven plugin: \`${CYCLONEDX_MAVEN_VERSION}\`"
+            echo "- CycloneDX Maven plugin: \`${CYCLONEDX_MAVEN_VERSION}\` (from pom.xml)"
             echo '- SBOM scope: direct and transitive dependencies including Maven test scope'
-            echo "- Jackson alignment: \`${JACKSON_VERSION}\` via imported BOM"
+            echo "- Jackson alignment: \`${JACKSON_VERSION}\` via imported BOM (from pom.xml)"
             echo "- Fixed HIGH/CRITICAL findings: ${findings}"
             echo '- Scanner: Trivy v0.74.0 SBOM mode'
           } >> "$GITHUB_STEP_SUMMARY"
