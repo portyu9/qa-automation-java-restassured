@@ -18,6 +18,24 @@ jobs:
       - name: Normalize and validate documentation
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256.': 'The checked-in Maven Wrapper downloads the repository-pinned Maven distribution only after validating its SHA-256.',
+              'Maven itself is similarly bounded to **3.9.x**. Wrapper 3.3.4 pins Maven 3.9.16 and a distribution checksum; Maven 4 is a future compatibility decision rather than an accidental ambient upgrade.': 'Maven itself is bounded to the repository-qualified line. The checked-in Maven Wrapper pins the selected distribution and its checksum; a future Maven major requires an explicit compatibility decision.',
+              'Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through Wrapper 3.3.4, Maven 3.9.16, and the checked distribution checksum.': 'Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through the checked-in Wrapper, repository-pinned distribution, and verified distribution checksum.',
+              'Testcontainers 1.x minor/patch maintenance remains enabled': 'maintenance within the currently qualified Testcontainers major remains enabled',
+              'retain the Testcontainers 1.x boundary until a 2.x runtime migration has complete integration evidence': 'retain the currently qualified Testcontainers major boundary until a future-major runtime migration has complete integration evidence',
+              'The primary contract is Java 25 full verification because current LTS should exercise the entire supported framework, including Testcontainers. Java 17 is the minimum compatibility boundary and receives a full extended lifecycle. Java 21 provides the intermediate LTS fast-compatibility signal.': 'The primary contract is full verification on the current qualified Java runtime because it should exercise the entire supported framework, including Testcontainers. The minimum supported runtime receives a full extended lifecycle, while an additional qualified runtime provides a fast compatibility signal.',
+              'The compiled release remains Java 17. Runtime support is explicitly qualified as:': 'The compiled release remains aligned to the minimum supported Java runtime. Runtime support is explicitly qualified by role:',
+              '- **Java 17** — minimum supported runtime;': '- **Minimum supported Java runtime** — bytecode/API compatibility boundary;',
+          }
+          for path in [Path('README.md'), *sorted(Path('docs').rglob('*.md'))]:
+              text = path.read_text(encoding='utf-8')
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              path.write_text(text, encoding='utf-8')
+          PY
           sed -i 's/\\\\/\\/g' .github/scripts/temp_versionless_java.py
           python3 .github/scripts/temp_versionless_java.py
           python3 .github/scripts/validate_readme.py
