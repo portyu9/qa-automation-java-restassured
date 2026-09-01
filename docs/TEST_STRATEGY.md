@@ -100,7 +100,7 @@ The test creates connection-scoped temporary state, inserts an owned row, captur
 
 The image is pinned to `postgres:<pinned-tag>`.
 
-Testcontainers remains on 1.21.4 until a 2.x migration proves the runtime, not just compilation. A future migration must verify Docker-client initialization, new module/package coordinates, minimum/current Java persistence execution, and security/dependency impact.
+Testcontainers remains on the currently qualified major line until a future-major migration proves runtime behavior, not just compilation. A future migration must verify Docker-client initialization, new module/package coordinates, minimum/current Java persistence execution, and security/dependency impact.
 
 ## Maven lifecycle policy
 
@@ -242,7 +242,7 @@ A framework change is ready when:
 - Failsafe evidence proves at least one executed integration test with no failures/errors/skips;
 - WireMock tests preserve real REST Assured semantics;
 - PostgreSQL integration remains deterministic and test-owned;
-- Testcontainers remains the accepted boundary unless a separately proven 2.x migration replaces it;
+- Testcontainers remains the accepted boundary unless a separately proven future-major migration replaces it;
 - shared diagnostics remain bounded and payload-free;
 - external GitHub Actions remain immutable-SHA pinned;
 - Trivy evidence is present and clean at the configured gate;
