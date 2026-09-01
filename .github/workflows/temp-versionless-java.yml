@@ -22,6 +22,7 @@ jobs:
           from pathlib import Path
           replacements = {
               'Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256.': 'The checked-in Maven Wrapper downloads the repository-pinned Maven distribution only after validating its SHA-256.',
+              'Wrapper 3.3.4 points to Maven 3.9.16 and a pinned distribution SHA-256.': 'The checked-in Maven Wrapper points to a repository-pinned Maven distribution and validates its SHA-256.',
               'Maven itself is similarly bounded to **3.9.x**. Wrapper 3.3.4 pins Maven 3.9.16 and a distribution checksum; Maven 4 is a future compatibility decision rather than an accidental ambient upgrade.': 'Maven itself is bounded to the repository-qualified line. The checked-in Maven Wrapper pins the selected distribution and its checksum; a future Maven major requires an explicit compatibility decision.',
               'Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through Wrapper 3.3.4, Maven 3.9.16, and the checked distribution checksum.': 'Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through the checked-in Wrapper, repository-pinned distribution, and verified distribution checksum.',
               'Testcontainers 1.x minor/patch maintenance remains enabled': 'maintenance within the currently qualified Testcontainers major remains enabled',
