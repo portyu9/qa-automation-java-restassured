@@ -4,14 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - "src/**"
-      - "pom.xml"
-      - ".mvn/wrapper/**"
-      - "mvnw"
-      - "mvnw.cmd"
-      - ".github/scripts/**"
-      - ".github/workflows/extended.yml"
   schedule:
     - cron: "17 8 * * 3"
   workflow_dispatch:
@@ -37,6 +29,8 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: maven
+      - name: Validate immutable workflow dependencies
+        run: python3 .github/scripts/validate_workflow_pins.py
       - name: Verify checksum-pinned Maven wrapper
         run: ./mvnw -v
       - name: Run full lifecycle including local HTTP and PostgreSQL integration contracts
