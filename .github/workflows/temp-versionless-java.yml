@@ -43,7 +43,7 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/scripts/temp_versionless_java.py .github/workflows/temp-versionless-java.yml
+          git rm -f .github/scripts/temp_versionless_java.py .github/workflows/temp-versionless-java.yml
           git add -A
           git diff --cached --check
           git commit -m "docs: make Java documentation versionless"
