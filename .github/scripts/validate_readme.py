@@ -122,9 +122,9 @@ def main() -> int:
     validate_stable_gates(text, errors)
 
     lower = text.lower()
-    for claim in ("java 25", "java 17", "maven 3.9.16"):
+    for claim in ("minimum supported java", "current qualified java", "maven wrapper"):
         if claim not in lower:
-            fail(f"README must document qualified toolchain claim: {claim}", errors)
+            fail(f"README must document versionless toolchain claim: {claim}", errors)
 
     if errors:
         print("README contract failed:")

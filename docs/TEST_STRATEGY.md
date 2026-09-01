@@ -12,10 +12,10 @@ The framework separates cheap deterministic API contracts from infrastructure-be
 | API behavior | REST Assured + JUnit | Dynamic-port WireMock | Surefire |
 | Structural contract | JSON Schema | Repository-owned fixture response | Surefire |
 | Stateful HTTP | REST Assured `CookieFilter` | Dynamic-port WireMock | Surefire |
-| Persistence | JDBC + Testcontainers | PostgreSQL 16.15 | Failsafe |
-| Current-LTS lifecycle | Java 25 | Full Maven `verify` | Surefire + Failsafe |
-| Minimum-runtime lifecycle | Java 17 | Full Maven `verify` in extended CI | Surefire + Failsafe |
-| Intermediate compatibility | Java 21 | Fast deterministic tests | Surefire |
+| Persistence | JDBC + Testcontainers | PostgreSQL | Failsafe |
+| Current-runtime lifecycle | Current qualified Java runtime | Full Maven `verify` | Surefire + Failsafe |
+| Minimum-runtime lifecycle | Minimum supported Java runtime | Full Maven `verify` in extended CI | Surefire + Failsafe |
+| Additional compatibility | Additional qualified Java runtime | Fast deterministic tests | Surefire |
 | Security | CodeQL / Trivy / Dependency Review | Source/repository/dependency delta | Security workflow |
 | Governance | README/workflow validators | Repository contract | Docs/CI status |
 
@@ -98,9 +98,9 @@ It must not automatically retain:
 
 The test creates connection-scoped temporary state, inserts an owned row, captures its generated identity, then queries that exact identity. This avoids row-order dependence, pre-existing IDs, and cleanup races.
 
-The image is pinned to `postgres:16.15-alpine`.
+The image is pinned to `postgres:<pinned-tag>`.
 
-Testcontainers remains on 1.21.4 until a 2.x migration proves the runtime, not just compilation. A future migration must verify Docker-client initialization, new module/package coordinates, Java 17 and Java 25 persistence execution, and security/dependency impact.
+Testcontainers remains on 1.21.4 until a 2.x migration proves the runtime, not just compilation. A future migration must verify Docker-client initialization, new module/package coordinates, minimum/current Java persistence execution, and security/dependency impact.
 
 ## Maven lifecycle policy
 
@@ -124,25 +124,25 @@ Do not use shell filename filtering to recreate lifecycle semantics outside Mave
 
 ## Java runtime policy
 
-The compiled release remains Java 17. Runtime support is explicitly qualified as:
+The compiled release remains aligned to the minimum supported Java runtime. Runtime support is explicitly qualified by role:
 
-- **Java 17** — minimum supported runtime;
-- **Java 21** — intermediate/previous LTS compatibility;
-- **Java 25** — current-LTS primary runtime.
+- **Minimum supported Java runtime** — bytecode/API compatibility boundary;
+- **Additional qualified Java runtime** — compatibility signal;
+- **Current qualified Java runtime** — primary runtime.
 
-Java 25 runs full `verify` in primary CI. Java 17 and Java 21 run fast compatibility in primary CI, and Java 17 also runs full `verify` in extended CI.
+The current qualified runtime runs full `verify` in primary CI. The minimum and additional qualified runtimes run fast compatibility in primary CI, and the minimum runtime also runs full `verify` in extended CI.
 
-Maven Enforcer accepts Java `[17,26)` only. Do not widen that range until a new runtime has corresponding workflow evidence and documentation.
+Maven Enforcer accepts only repository-qualified Java runtimes. Do not widen that range until a new runtime has corresponding workflow evidence and documentation.
 
 ## Maven toolchain policy
 
 The Wrapper is authoritative:
 
-- Wrapper 3.3.4;
-- Maven 3.9.16;
+- the checked-in Maven Wrapper;
+- the repository-pinned Maven distribution;
 - pinned Maven distribution SHA-256.
 
-Maven Enforcer accepts `[3.9,4)`. Maven 4 is not automatically supported because it is newer; it requires a compatibility change with lifecycle evidence.
+Maven Enforcer accepts only the repository-qualified Maven line. a future Maven major is not automatically supported because it is newer; it requires a compatibility change with lifecycle evidence.
 
 ## Semantic evidence policy
 
@@ -214,9 +214,9 @@ Required framework CI should not depend on a public demonstration API merely to 
 | --- | --- |
 | Enforcer | Unsupported runtime/toolchain |
 | Wrapper checksum | Maven provenance failure |
-| Java 17/21 fast | Runtime compatibility / API assumption |
-| Java 25 full | Current-LTS / integration interaction |
-| Java 17 extended full | Minimum-runtime persistence interaction |
+| Minimum/additional-runtime fast | Runtime compatibility / API assumption |
+| current-runtime full | Current-LTS / integration interaction |
+| minimum-runtime extended full | Minimum-runtime persistence interaction |
 | Surefire evidence | Fast-suite discovery/skips/report integrity |
 | Failsafe evidence | Integration discovery/container/report integrity |
 | WireMock HTTP | Protocol/request-policy defect |
@@ -235,14 +235,14 @@ A framework change is ready when:
 
 - Enforcer accepts only the deliberately supported Java/Maven envelope;
 - the Wrapper checksum and Maven version are correct;
-- Java 17 and Java 21 fast compatibility pass;
-- Java 25 full lifecycle passes;
-- Java 17 extended full lifecycle passes when applicable;
+- minimum and additional Java compatibility pass;
+- current-runtime full lifecycle passes;
+- minimum-runtime extended full lifecycle passes when applicable;
 - Surefire evidence proves at least 14 executed tests with no failures/errors/skips;
 - Failsafe evidence proves at least one executed integration test with no failures/errors/skips;
 - WireMock tests preserve real REST Assured semantics;
 - PostgreSQL integration remains deterministic and test-owned;
-- Testcontainers 1.21.4 remains the accepted boundary unless a separately proven 2.x migration replaces it;
+- Testcontainers remains the accepted boundary unless a separately proven 2.x migration replaces it;
 - shared diagnostics remain bounded and payload-free;
 - external GitHub Actions remain immutable-SHA pinned;
 - Trivy evidence is present and clean at the configured gate;

@@ -35,8 +35,8 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 | Protocol composition | Path/query parameters, reusable specs, extraction, cookies, bounded telemetry | Native REST Assured filters/specs | JUnit/Surefire |
 | Framework policy | URL safety, timeout policy, correlation identity, helper composition | Pure/local JUnit contracts | Surefire |
 | External API | Provider/environment behavior | Explicit `TEST_BASE_URL` | Intentional integration signal |
-| Persistence | JDBC, PostgreSQL dialect, generated identity, owned row behavior | Testcontainers 1.21.4 + PostgreSQL 16.15 | Failsafe XML/text |
-| Runtime compatibility | Bytecode/runtime behavior across supported Java releases | Java 17, 21, 25 + Maven 3.9.16 Wrapper | Matrix/lifecycle reports |
+| Persistence | JDBC, PostgreSQL dialect, generated identity, owned row behavior | Testcontainers + PostgreSQL | Failsafe XML/text |
+| Runtime compatibility | Bytecode/runtime behavior across supported Java releases | supported Java runtimes + Maven Wrapper | Matrix/lifecycle reports |
 | Evidence integrity | Intended suites actually executed with clean terminal state | Repository-owned XML validator | Minimum-count + failure/error/skip checks |
 | Security | Java SAST, Maven test-dependency risk, repository policy/secret risk, PR dependency-change risk | CodeQL + CycloneDX/Trivy SBOM + repository Trivy + Dependency Review when available | Code scanning + retained SBOM/JSON/status |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
@@ -56,17 +56,17 @@ flowchart LR
     SPEC --> RA[REST Assured]
     RA --> WM[Dynamic-port WireMock fixture]
 
-    DBTEST[PostgresIntegrationTest] --> TC[Testcontainers 1.21.4]
-    TC --> PG[(PostgreSQL 16.15)]
+    DBTEST[PostgresIntegrationTest] --> TC[Testcontainers]
+    TC --> PG[(PostgreSQL)]
 
     WM --> SURE[Surefire XML evidence]
     PG --> FAIL[Failsafe XML evidence]
     SURE --> EVIDENCE[Semantic evidence validator]
     FAIL --> EVIDENCE
 
-    J25[Java 25 current-LTS full verify] --> EVIDENCE
-    J17[Java 17 minimum-runtime full verify] --> EVIDENCE
-    J21[Java 21 fast compatibility] --> EVIDENCE
+    J25[current qualified Java full verify] --> EVIDENCE
+    J17[minimum supported Java full verify] --> EVIDENCE
+    J21[additional Java compatibility] --> EVIDENCE
 
     CODEQL[CodeQL] --> SG[Security / security-gate]
     BOM[CycloneDX test-scope SBOM] --> SBOMSCAN[Trivy SBOM vulnerability gate]
@@ -91,15 +91,15 @@ The architecture deliberately keeps **library capability**, **application/test p
 | Stateful HTTP | REST Assured `CookieFilter` is scoped to the scenario that intentionally owns state. |
 | Assertion depth | Protocol, structure, semantics, and failure behavior are independent contracts. |
 | HTTP simulation | WireMock models service-boundary behavior; REST Assured itself is never mocked. |
-| Persistence | Testcontainers 1.21.4 owns the PostgreSQL integration boundary; image `postgres:16.15-alpine` is intentionally pinned. |
+| Persistence | Testcontainers owns the PostgreSQL integration boundary; image `postgres:<pinned-tag>` is intentionally pinned. |
 | Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest`. |
 | Evidence floor | Required fast evidence proves at least 14 executed Surefire tests; full lifecycle also proves at least 1 executed Failsafe test. |
 | Disabled tests | Required evidence fails when Maven XML reports skipped tests. |
-| Build toolchain | Wrapper 3.3.4 downloads Maven 3.9.16 only after validating the pinned distribution SHA-256. |
-| Supported Java | Java 17 minimum, Java 21 compatibility, Java 25 current LTS; Enforcer rejects Java 26+ until explicitly qualified. |
-| Supported Maven | Maven 3.9.x only; Enforcer rejects Maven 4 until deliberately qualified. |
-| Jackson alignment | The REST Assured schema-validator transitive graph is normalized with Jackson BOM 2.18.8; retained SBOM evidence proves `jackson-core` and `jackson-databind` resolve to that governed version. |
-| Dependency evidence | CycloneDX 2.9.3 generates a JSON SBOM including Maven test scope; the gate requires governed REST Assured, JUnit, Testcontainers, PostgreSQL, and Jackson components before scanning. |
+| Build toolchain | The checked-in Maven Wrapper downloads the repository-pinned Maven distribution only after validating its SHA-256. |
+| Supported Java | The minimum supported runtime, an additional compatibility runtime, and the current qualified Java runtime are exercised; future unqualified Java releases are rejected until deliberately supported. |
+| Supported Maven | The repository-pinned Maven line is enforced; future unqualified Maven majors are rejected until deliberately supported. |
+| Jackson alignment | The REST Assured schema-validator transitive graph is normalized with Jackson BOM; retained SBOM evidence proves `jackson-core` and `jackson-databind` resolve to that governed version. |
+| Dependency evidence | CycloneDX generates a JSON SBOM including Maven test scope; the gate requires governed REST Assured, JUnit, Testcontainers, PostgreSQL, and Jackson components before scanning. |
 | Workflow supply chain | External GitHub Actions are full-SHA pinned and checked by a repository-local validator. |
 | CI safety | Read-only default permissions, least-privilege security permissions, concurrency cancellation, bounded jobs, fail-closed evidence uploads. |
 
@@ -143,7 +143,7 @@ Only directories are shown in the repository map. Root files own Maven/dependenc
 
 ## Quick start
 
-Prerequisites are a supported Java runtime (**17, 21, or 25**) and a Docker-compatible runtime for PostgreSQL integration verification. The checked-in Maven Wrapper downloads **Maven 3.9.16** on first use and validates its repository-pinned SHA-256; a separately installed Maven is not required.
+Prerequisites are a supported Java runtime (**a supported Java runtime**) and a Docker-compatible runtime for PostgreSQL integration verification. The checked-in Maven Wrapper downloads **the repository-pinned Maven distribution** on first use and validates its repository-pinned SHA-256; a separately installed Maven is not required.
 
 ```bash
 # deterministic API/framework contracts
@@ -180,18 +180,18 @@ The external base URI must be absolute HTTP(S), have a hostname, and contain no 
 
 Maven is part of the test architecture, not merely a command launcher. Surefire and Failsafe communicate infrastructure cost and failure domain through lifecycle ownership. Maven Enforcer guards the supported execution envelope before meaningful test work begins.
 
-The project compiles with `maven.compiler.release=17`, so the test framework preserves Java 17 bytecode/API compatibility while qualifying newer LTS runtimes independently.
+The project compiles with `maven.compiler.release` minimum-runtime policy, so the test framework preserves minimum-Java bytecode/API compatibility while qualifying newer LTS runtimes independently.
 
 Current CI is intentionally asymmetric:
 
-- **Java 25 current LTS** runs the complete `verify` lifecycle and is the primary execution contract;
-- **Java 17 minimum runtime** and **Java 21 compatibility runtime** run the deterministic fast layer in primary CI;
-- **Java 17** also runs a full extended lifecycle so the minimum supported runtime exercises the PostgreSQL boundary;
-- Java 26+ is rejected until an explicit support decision expands the matrix and Enforcer policy.
+- **the current qualified Java runtime** runs the complete `verify` lifecycle and is the primary execution contract;
+- **the minimum supported Java runtime** and **an additional qualified Java runtime** run the deterministic fast layer in primary CI;
+- **The minimum supported Java runtime** also runs a full extended lifecycle so the minimum supported runtime exercises the PostgreSQL boundary;
+- future unqualified Java releases is rejected until an explicit support decision expands the matrix and Enforcer policy.
 
 This is stronger than a broad unbounded `Java >=17` claim. Compatibility is something the repository proves, not something the version parser merely permits.
 
-Maven itself is similarly bounded to **3.9.x**. Wrapper 3.3.4 pins Maven 3.9.16 and a distribution checksum; Maven 4 is a future compatibility decision rather than an accidental ambient upgrade.
+Maven itself is bounded to the repository-qualified line. The checked-in Maven Wrapper pins the selected distribution and its checksum; a future Maven major requires an explicit compatibility decision.
 
 ## Shared request policy
 
@@ -234,13 +234,13 @@ WireMock stubs the **provider boundary**, not the HTTP client. Serialization, he
 
 `PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only because driver, SQL dialect, generated identity, and query semantics are material. Test-owned state uses a temporary table and generated identity, so reruns do not depend on global row ordering or cleanup timing.
 
-The database image is pinned to `postgres:16.15-alpine`. The repository intentionally retains **Testcontainers 1.21.4** until a safe 2.x migration is demonstrated. A prior 2.0.5 migration compiled but failed during Docker-client initialization because of an incompatible assembled Jackson annotation runtime; the 2.x PostgreSQL module/package coordinates also change. That is an explicit migration boundary, not a forgotten update.
+The database image is pinned to `postgres:<pinned-tag>`. The repository intentionally retains **Testcontainers** until a safe 2.x migration is demonstrated. A prior prior major-version migration compiled but failed during Docker-client initialization because of an incompatible assembled Jackson annotation runtime; the 2.x PostgreSQL module/package coordinates also change. That is an explicit migration boundary, not a forgotten update.
 
-A future Testcontainers 2 migration should therefore prove, at minimum:
+A future a future Testcontainers major migration should therefore prove, at minimum:
 
 - new module/package coordinates compile cleanly;
 - Docker client initialization succeeds on the supported CI host;
-- PostgreSQL lifecycle and JDBC contracts pass on Java 17 and Java 25;
+- PostgreSQL lifecycle and JDBC contracts pass on the minimum and current qualified Java runtimes;
 - the resolved transitive graph has no accepted blocker that merely moved into a shaded layer;
 - dependency/security evidence remains green.
 
@@ -272,8 +272,8 @@ Evidence directories use `if-no-files-found: error`; missing reports are failure
 
 The workflow internals can evolve while external status interfaces remain small and durable:
 
-- `ci / ci-gate` aggregates Java 17/21 fast compatibility and Java 25 current-LTS full verification;
-- `extended / extended-gate` aggregates the Java 17 minimum-runtime full lifecycle;
+- `ci / ci-gate` aggregates minimum/additional Java compatibility and current-runtime full verification;
+- `extended / extended-gate` aggregates the minimum-supported-runtime full lifecycle;
 - `security / security-gate` aggregates CodeQL, Maven test-scope SBOM vulnerability scanning, repository Trivy policy scanning, and event-applicable Dependency Review/fallback behavior.
 
 Repository rules/settings are a separate governance layer. The workflows expose stable conclusions without implying that a particular repository rule is configured.
@@ -286,18 +286,18 @@ Security controls remain independent because they answer different questions:
 - **Maven test-dependency SBOM gate** uses pinned CycloneDX Maven plugin 2.9.3 with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with Trivy v0.74.0 for fixed HIGH/CRITICAL vulnerabilities;
 - **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;
 - **Dependency Review** evaluates newly introduced dependency risk on pull requests when GitHub Dependency graph is available;
-- **Maven Wrapper provenance** pins Maven 3.9.16 and verifies its SHA-256 before execution;
+- **Maven Wrapper provenance** pins the repository-pinned Maven distribution and verifies its SHA-256 before execution;
 - **workflow pin validation** requires every external GitHub Action reference to be a full immutable commit SHA.
 
 The SBOM gate exists because repository-filesystem scanning alone does not reliably prove the resolved Maven **test** dependency graph. Missing SBOM or Trivy JSON evidence is a failure, and artifact uploads use `if-no-files-found: error`.
 
 If GitHub Dependency graph is unavailable, the workflow records that limitation. The Maven SBOM vulnerability gate and repository Trivy policy remain independent required controls, but neither is represented as equivalent to change-aware dependency-diff analysis.
 
-The REST Assured 6.0.1 JSON-schema-validator path currently reaches `java-json-tools`, which otherwise selects Jackson 2.11.0. The repository imports **Jackson BOM 2.18.8** so `jackson-core` and `jackson-databind` resolve as one coherent patched family. The SBOM validator requires both components at that governed version and rejects conflicting versions before vulnerability scanning.
+The REST Assured JSON-schema-validator path currently reaches `java-json-tools`, which otherwise selects an older transitive Jackson release. The repository imports **Jackson BOM** so `jackson-core` and `jackson-databind` resolve as one coherent patched family. The SBOM validator requires both components at that governed version and rejects conflicting versions before vulnerability scanning.
 
 ## Dependency maintenance
 
-Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through Wrapper 3.3.4, Maven 3.9.16, and the checked distribution checksum.
+Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execution itself is pinned separately through the checked-in Wrapper, repository-pinned distribution, and verified distribution checksum.
 
 - weekly Monday maintenance cadence;
 - minor/patch updates can be grouped for efficient review;
@@ -306,7 +306,7 @@ Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execut
 - wrapper changes require deliberate version/checksum changes plus full lifecycle verification;
 - dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, repository security, and documentation gates as applicable.
 
-Dependabot can update dependencies whose package coordinates remain stable, including the imported Jackson BOM. Migrations that rename modules or Java packages require deliberate code changes. Testcontainers 2 is such a migration and its major updates are intentionally excluded from automated Dependabot PRs while Testcontainers 1.x minor/patch maintenance remains enabled.
+Dependabot can update dependencies whose package coordinates remain stable, including the imported Jackson BOM. Migrations that rename modules or Java packages require deliberate code changes. a future Testcontainers major is such a migration and its major updates are intentionally excluded from automated Dependabot PRs while maintenance within the currently qualified Testcontainers major remains enabled.
 
 ## Failure triage
 
@@ -314,9 +314,9 @@ Dependabot can update dependencies whose package coordinates remain stable, incl
 | --- | --- |
 | Enforcer failure | Unsupported Java/Maven runtime |
 | Wrapper checksum failure | Build-tool provenance failure |
-| Java 17/21 fast-only failure | Runtime compatibility or bytecode/API assumption |
-| Java 25 full-only failure | Current-LTS/runtime or persistence interaction |
-| Java 17 extended full-only failure | Minimum-runtime persistence integration |
+| minimum/additional-runtime fast-only failure | Runtime compatibility or bytecode/API assumption |
+| current-runtime full-only failure | Current-LTS/runtime or persistence interaction |
+| minimum-runtime extended full-only failure | Minimum-runtime persistence integration |
 | Surefire evidence-floor failure | Fast-suite discovery, skips, or report-integrity regression |
 | Failsafe evidence-floor failure | Integration discovery/container execution/report regression |
 | WireMock-only failure | HTTP contract/request-policy behavior |

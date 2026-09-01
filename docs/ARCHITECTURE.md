@@ -19,8 +19,8 @@ flowchart LR
     SPECS --> RA[REST Assured]
     RA --> WM[WireMock dynamic-port fixture]
 
-    DB[PostgresIntegrationTest] --> TC[Testcontainers 1.21.4]
-    TC --> PG[(PostgreSQL 16.15)]
+    DB[PostgresIntegrationTest] --> TC[Testcontainers]
+    TC --> PG[(PostgreSQL)]
 
     WM --> SURE[Surefire reports]
     PG --> FAIL[Failsafe reports]
@@ -96,14 +96,14 @@ An individual test may inspect a body to prove behavior without making that body
 
 The integration owns:
 
-- a pinned `postgres:16.15-alpine` image;
+- a pinned `postgres:<pinned-tag>` image;
 - an isolated container lifecycle;
 - a temporary test-owned table;
 - generated identity retrieval;
 - parameterized insert/select behavior;
 - deterministic cleanup through connection/container lifecycle.
 
-The repository deliberately remains on Testcontainers 1.21.4. The prior 2.0.5 migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and the 2.x module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
+The repository deliberately remains on Testcontainers. The prior prior major-version migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and the 2.x module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
 
 ## Maven lifecycle boundary
 
@@ -111,13 +111,13 @@ Surefire owns fast API/framework contracts. Failsafe owns `*IntegrationTest` and
 
 The project compiles with Java release 17 while runtime qualification is explicit:
 
-- Java 25 current LTS: complete primary `verify` lifecycle;
-- Java 21: fast compatibility;
-- Java 17 minimum runtime: fast compatibility in primary CI and full `verify` in extended CI.
+- current qualified Java runtime: complete primary `verify` lifecycle;
+- additional qualified Java runtime: fast compatibility;
+- minimum supported Java runtime: fast compatibility in primary CI and full `verify` in extended CI.
 
-Maven Enforcer bounds Java to `[17,26)` and Maven to `[3.9,4)`. This prevents an unqualified Java 26 or Maven 4 environment from being interpreted as supported merely because it happens to compile.
+Maven Enforcer bounds Java and Maven to repository-qualified runtime lines. This prevents an unqualified a future unqualified Java release or a future Maven major environment from being interpreted as supported merely because it happens to compile.
 
-The Maven Wrapper is part of provenance. Wrapper 3.3.4 points to Maven 3.9.16 and a pinned distribution SHA-256.
+The Maven Wrapper is part of provenance. The checked-in Maven Wrapper points to a repository-pinned Maven distribution and validates its SHA-256.
 
 ## Evidence boundary
 
@@ -141,13 +141,13 @@ Artifacts use `if-no-files-found: error`, so evidence disappearance is itself a 
 
 Runtime matrices should change one meaningful risk dimension at a time.
 
-The primary contract is Java 25 full verification because current LTS should exercise the entire supported framework, including Testcontainers. Java 17 is the minimum compatibility boundary and receives a full extended lifecycle. Java 21 provides the intermediate LTS fast-compatibility signal.
+The primary contract is full verification on the current qualified Java runtime because it should exercise the entire supported framework, including Testcontainers. The minimum supported runtime receives a full extended lifecycle, while an additional qualified runtime provides a fast compatibility signal.
 
 This gives three useful failure interpretations:
 
-- Java 17/21 fast-only failure → compatibility/API assumption;
-- Java 25 full-only failure → current-LTS or integration interaction;
-- Java 17 extended-full-only failure → minimum-runtime persistence interaction.
+- minimum/additional-runtime fast-only failure → compatibility/API assumption;
+- current-runtime full-only failure → current-LTS or integration interaction;
+- minimum-runtime extended-full-only failure → minimum-runtime persistence interaction.
 
 ## Security boundary
 
@@ -186,4 +186,4 @@ New framework behavior should:
 9. assign expensive integration tests to Failsafe rather than hiding them in fast suites;
 10. update semantic evidence floors when the intended suite deliberately changes;
 11. qualify runtime/toolchain expansion in CI before widening Enforcer ranges;
-12. retain the Testcontainers 1.x boundary until a 2.x runtime migration has complete integration evidence.
+12. retain the currently qualified Testcontainers major boundary until a future-major runtime migration has complete integration evidence.
