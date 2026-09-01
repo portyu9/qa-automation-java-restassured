@@ -143,7 +143,7 @@ Only directories are shown in the repository map. Root files own Maven/dependenc
 
 ## Quick start
 
-Prerequisites are a supported Java runtime (**a supported Java runtime**) and a Docker-compatible runtime for PostgreSQL integration verification. The checked-in Maven Wrapper downloads **the repository-pinned Maven distribution** on first use and validates its repository-pinned SHA-256; a separately installed Maven is not required.
+Prerequisites are a supported Java runtime and a Docker-compatible runtime for PostgreSQL integration verification. The checked-in Maven Wrapper downloads **the repository-pinned Maven distribution** on first use and validates its repository-pinned SHA-256; a separately installed Maven is not required.
 
 ```bash
 # deterministic API/framework contracts
@@ -180,16 +180,16 @@ The external base URI must be absolute HTTP(S), have a hostname, and contain no 
 
 Maven is part of the test architecture, not merely a command launcher. Surefire and Failsafe communicate infrastructure cost and failure domain through lifecycle ownership. Maven Enforcer guards the supported execution envelope before meaningful test work begins.
 
-The project compiles with `maven.compiler.release` minimum-runtime policy, so the test framework preserves minimum-Java bytecode/API compatibility while qualifying newer LTS runtimes independently.
+The project compiles with the configured `maven.compiler.release` minimum-runtime policy, so the test framework preserves minimum-Java bytecode/API compatibility while qualifying newer LTS runtimes independently.
 
 Current CI is intentionally asymmetric:
 
 - **the current qualified Java runtime** runs the complete `verify` lifecycle and is the primary execution contract;
 - **the minimum supported Java runtime** and **an additional qualified Java runtime** run the deterministic fast layer in primary CI;
 - **The minimum supported Java runtime** also runs a full extended lifecycle so the minimum supported runtime exercises the PostgreSQL boundary;
-- future unqualified Java releases is rejected until an explicit support decision expands the matrix and Enforcer policy.
+- future unqualified Java releases are rejected until an explicit support decision expands the matrix and Enforcer policy.
 
-This is stronger than a broad unbounded `Java >=17` claim. Compatibility is something the repository proves, not something the version parser merely permits.
+This is stronger than an unbounded minimum-version claim. Compatibility is something the repository proves, not something the version parser merely permits.
 
 Maven itself is bounded to the repository-qualified line. The checked-in Maven Wrapper pins the selected distribution and its checksum; a future Maven major requires an explicit compatibility decision.
 
@@ -234,9 +234,9 @@ WireMock stubs the **provider boundary**, not the HTTP client. Serialization, he
 
 `PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only because driver, SQL dialect, generated identity, and query semantics are material. Test-owned state uses a temporary table and generated identity, so reruns do not depend on global row ordering or cleanup timing.
 
-The database image is pinned to `postgres:<pinned-tag>`. The repository intentionally retains **Testcontainers** until a safe 2.x migration is demonstrated. A prior prior major-version migration compiled but failed during Docker-client initialization because of an incompatible assembled Jackson annotation runtime; the 2.x PostgreSQL module/package coordinates also change. That is an explicit migration boundary, not a forgotten update.
+The database image is pinned to `postgres:<pinned-tag>`. The repository intentionally retains **Testcontainers** until a safe future-major migration is demonstrated. A prior major-version migration compiled but failed during Docker-client initialization because of an incompatible assembled Jackson annotation runtime; the future-major PostgreSQL module/package coordinates also change. That is an explicit migration boundary, not a forgotten update.
 
-A future a future Testcontainers major migration should therefore prove, at minimum:
+A future Testcontainers major migration should therefore prove, at minimum:
 
 - new module/package coordinates compile cleanly;
 - Docker client initialization succeeds on the supported CI host;
@@ -283,7 +283,7 @@ Repository rules/settings are a separate governance layer. The workflows expose 
 Security controls remain independent because they answer different questions:
 
 - **CodeQL `security-extended`** analyzes Java source/data-flow behavior after a controlled test compilation;
-- **Maven test-dependency SBOM gate** uses pinned CycloneDX Maven plugin 2.9.3 with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with Trivy v0.74.0 for fixed HIGH/CRITICAL vulnerabilities;
+- **Maven test-dependency SBOM gate** uses repository-pinned CycloneDX Maven plugin with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with the repository-pinned Trivy scanner for fixed HIGH/CRITICAL vulnerabilities;
 - **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;
 - **Dependency Review** evaluates newly introduced dependency risk on pull requests when GitHub Dependency graph is available;
 - **Maven Wrapper provenance** pins the repository-pinned Maven distribution and verifies its SHA-256 before execution;
@@ -345,7 +345,7 @@ Dependabot can update dependencies whose package coordinates remain stable, incl
 - accepting skipped integration tests as successful persistence evidence;
 - treating repository filesystem scanning as proof of a resolved Maven test graph;
 - overriding one vulnerable Jackson jar without governing the compatible Jackson family;
-- unbounded `Java >=17` or Maven version claims without corresponding CI qualification;
+- unbounded Java or Maven version claims without corresponding CI qualification;
 - forcing ecosystem migrations merely because an update tool can identify a higher version.
 
 ## Design references

@@ -103,7 +103,7 @@ The integration owns:
 - parameterized insert/select behavior;
 - deterministic cleanup through connection/container lifecycle.
 
-The repository deliberately remains on Testcontainers. The prior prior major-version migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and the 2.x module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
+The repository deliberately remains on Testcontainers. The prior major-version migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and the future-major module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
 
 ## Maven lifecycle boundary
 
