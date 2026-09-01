@@ -15,6 +15,9 @@ concurrency:
   group: security-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  CYCLONEDX_MAVEN_VERSION: 2.9.3
+
 jobs:
   codeql:
     name: CodeQL
@@ -49,71 +52,154 @@ jobs:
       - name: Analyze
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
 
-  trivy:
-    name: Trivy
+  maven-dependencies:
+    name: Maven dependency vulnerabilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 25 LTS
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+      - name: Validate immutable workflow dependencies
+        run: python3 .github/scripts/validate_workflow_pins.py
+      - name: Verify checksum-pinned Maven wrapper
+        run: ./mvnw -v
+      - name: Generate CycloneDX SBOM including test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/security/maven
+          configured_version="$(python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('pom.xml').getroot()
+          ns = {'m': 'http://maven.apache.org/POM/4.0.0'}
+          value = root.findtext('m:properties/m:cyclonedx.maven.version', namespaces=ns)
+          if not value:
+              raise SystemExit('pom.xml does not pin cyclonedx.maven.version')
+          print(value)
+          PY
+          )"
+          [[ "$configured_version" == "$CYCLONEDX_MAVEN_VERSION" ]] || {
+            echo "CycloneDX version mismatch: pom=$configured_version workflow=$CYCLONEDX_MAVEN_VERSION" >&2
+            exit 1
+          }
+          ./mvnw -B -ntp \
+            org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom \
+            -DincludeTestScope=true \
+            -DoutputFormat=json \
+            -DoutputName=security-bom \
+            -DoutputDirectory=reports/security/maven \
+            -Dcyclonedx.skipAttach=true
+      - name: Validate test-scope SBOM evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          bom="reports/security/maven/security-bom.json"
+          [[ -s "$bom" ]] || { echo "missing CycloneDX SBOM: $bom" >&2; exit 1; }
+          jq -e '
+            (.bomFormat == "CycloneDX")
+            and ((.components // []) | type == "array")
+            and (((.components // []) | length) > 10)
+            and (((.components // []) | map(select(.group == "io.rest-assured" and .name == "rest-assured")) | length) > 0)
+            and (((.components // []) | map(select(.group == "org.junit.jupiter" and .name == "junit-jupiter")) | length) > 0)
+            and (((.components // []) | map(select(.group == "org.testcontainers" and .name == "postgresql")) | length) > 0)
+            and (((.components // []) | map(select(.group == "org.postgresql" and .name == "postgresql")) | length) > 0)
+          ' "$bom" >/dev/null
+          echo "CycloneDX components=$(jq '(.components // []) | length' "$bom")"
+      - name: Scan test-scope SBOM for HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: sbom
+          scan-ref: reports/security/maven/security-bom.json
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: reports/security/maven/trivy-sbom.json
+          exit-code: "1"
+      - name: Require Maven vulnerability evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="reports/security/maven/trivy-sbom.json"
+          [[ -s "$report" ]] || { echo "Trivy did not produce Maven SBOM vulnerability evidence" >&2; exit 1; }
+          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.74.0")' "$report" >/dev/null
+          findings=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
+          {
+            echo '### Maven test-dependency vulnerability gate'
+            echo
+            echo "- CycloneDX Maven plugin: \`${CYCLONEDX_MAVEN_VERSION}\`"
+            echo '- SBOM scope: direct and transitive dependencies including Maven test scope'
+            echo "- Fixed HIGH/CRITICAL findings: ${findings}"
+            echo '- Scanner: Trivy v0.74.0 SBOM mode'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Maven dependency security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maven-dependency-security-evidence-${{ github.run_id }}
+          path: reports/security/maven/
+          if-no-files-found: error
+          retention-days: 14
+
+  trivy-repository:
+    name: Trivy repository policy
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare evidence directory
-        run: mkdir -p reports/security
-      - name: Scan dependencies, configuration, and repository secrets
+        run: mkdir -p reports/security/repository
+      - name: Scan repository configuration and secrets
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_INCLUDE_DEV_DEPS: "true"
         with:
           version: v0.74.0
           scan-type: fs
           scan-ref: .
-          scanners: vuln,misconfig,secret
+          scanners: misconfig,secret
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
           format: json
-          output: reports/security/trivy.json
+          output: reports/security/repository/trivy.json
           exit-code: "1"
-      - name: Require and summarize security evidence
+      - name: Require and summarize repository security evidence
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          report="reports/security/trivy.json"
-          summary="reports/security/summary.md"
+          report="reports/security/repository/trivy.json"
+          summary="reports/security/repository/summary.md"
           if [[ ! -s "$report" ]]; then
-            printf '### Security gate\n\nTrivy did not produce a report. Treating missing scanner evidence as a gate failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
+            printf '### Repository security gate\n\nTrivy did not produce a report. Treating missing scanner evidence as a gate failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          jq -e '
-            (.SchemaVersion == 2)
-            and (.Trivy.Version == "0.74.0")
-            and ((.Results // []) | type == "array")
-            and (((.Results // []) | map(select(.Type == "pom" or ((.Target // "") | endswith("pom.xml")))) | length) > 0)
-            and (((.Results // []) | map(select(.Type == "pom" or ((.Target // "") | endswith("pom.xml"))) | .Packages[]?) | length) > 1)
-          ' "$report" >/dev/null
-          vulnerabilities=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
+          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.74.0")' "$report" >/dev/null
           misconfigurations=$(jq '[.Results[]? | .Misconfigurations[]?] | length' "$report")
           secrets=$(jq '[.Results[]? | .Secrets[]?] | length' "$report")
-          maven_packages=$(jq '[.Results[]? | select(.Type == "pom" or ((.Target // "") | endswith("pom.xml"))) | .Packages[]?] | length' "$report")
           {
-            echo '### Open-source security gate'
+            echo '### Repository security gate'
             echo
             echo '| Signal | Findings |'
             echo '| --- | ---: |'
-            echo "| Fixed HIGH/CRITICAL vulnerabilities | ${vulnerabilities} |"
             echo "| HIGH/CRITICAL misconfigurations | ${misconfigurations} |"
             echo "| Gated secret findings | ${secrets} |"
-            echo "| Maven packages represented | ${maven_packages} |"
             echo
             echo '- Scanner: Trivy v0.74.0'
-            echo '- Scope: repository filesystem, Maven production/test dependency graph, supported configuration files, and committed secret material'
-            echo '- Policy: gated findings retain a nonzero scan result; missing/invalid JSON or a project-only Maven result fails the job'
+            echo '- Scope: repository configuration and committed secret material; Maven vulnerability scanning is a separate test-scope SBOM job'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload security evidence
+      - name: Upload repository security evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: trivy-security-evidence-${{ github.run_id }}
-          path: reports/security/
+          name: trivy-repository-evidence-${{ github.run_id }}
+          path: reports/security/repository/
           if-no-files-found: error
           retention-days: 14
 
@@ -142,12 +228,12 @@ jobs:
             echo 'GitHub Dependency graph is available; running change-aware Dependency Review.'
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo '::warning::GitHub Dependency graph is unavailable; the workflow-level Trivy HIGH/CRITICAL gate remains authoritative, but change-aware Dependency Review cannot run.'
+            echo '::warning::GitHub Dependency graph is unavailable; independent Maven SBOM vulnerability and repository Trivy gates remain authoritative, but change-aware Dependency Review cannot run.'
             {
               echo '### Dependency Review fallback'
               echo
               echo 'GitHub Dependency graph is unavailable for this repository, so pull-request diff analysis cannot run.'
-              echo 'The independent Trivy job still fails this security workflow on fixed HIGH/CRITICAL dependency findings, HIGH/CRITICAL supported misconfigurations, or gated secret findings. Enable Dependency graph in repository security settings to add the stronger change-aware review.'
+              echo 'Independent Maven test-scope SBOM vulnerability scanning and repository Trivy policy checks remain required. Enable Dependency graph in repository security settings to add change-aware review.'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Review dependency changes
@@ -155,28 +241,30 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-      - name: Confirm repository-wide fallback gate
+      - name: Confirm independent fallback gates
         if: steps.dependency-graph.outputs.available != 'true'
-        run: echo 'Dependency Review service unavailable; Trivy remains a required independent job in this workflow.'
+        run: echo 'Dependency Review service unavailable; Maven SBOM vulnerability and repository Trivy jobs remain independent required gates.'
 
   security-gate:
     name: security-gate
     if: always()
-    needs: [codeql, trivy, dependency-review]
+    needs: [codeql, maven-dependencies, trivy-repository, dependency-review]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Evaluate security jobs
         env:
           CODEQL: ${{ needs.codeql.result }}
-          TRIVY: ${{ needs.trivy.result }}
+          MAVEN_DEPENDENCIES: ${{ needs.maven-dependencies.result }}
+          TRIVY_REPOSITORY: ${{ needs.trivy-repository.result }}
           DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
           EVENT: ${{ github.event_name }}
           SAME_REPOSITORY_PR: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$TRIVY" == "success" ]] || { echo "trivy=$TRIVY"; exit 1; }
+          [[ "$MAVEN_DEPENDENCIES" == "success" ]] || { echo "maven-dependencies=$MAVEN_DEPENDENCIES"; exit 1; }
+          [[ "$TRIVY_REPOSITORY" == "success" ]] || { echo "trivy-repository=$TRIVY_REPOSITORY"; exit 1; }
           if [[ "$SAME_REPOSITORY_PR" == "true" ]]; then
             [[ "$CODEQL" == "success" ]] || { echo "codeql=$CODEQL"; exit 1; }
           else
