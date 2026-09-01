@@ -18,6 +18,7 @@ jobs:
       - name: Normalize and validate documentation
         run: |
           set -euo pipefail
+          sed -i 's/\\\\/\\/g' .github/scripts/temp_versionless_java.py
           python3 .github/scripts/temp_versionless_java.py
           python3 .github/scripts/validate_readme.py
           git diff --check
