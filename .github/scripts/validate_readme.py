@@ -118,8 +118,14 @@ def validate_postgres_runtime_contract(errors: list[str]) -> None:
     if not match:
         fail("PostgreSQL integration must define a versioned postgres tag pinned by sha256 digest", errors)
         return
-    if "new PostgreSQLContainer<>(POSTGRES_IMAGE)" not in source:
-        fail("PostgreSQLContainer must consume the governed POSTGRES_IMAGE constant", errors)
+    required_source_tokens = (
+        "DockerImageName.parse(POSTGRES_IMAGE)",
+        '.asCompatibleSubstituteFor("postgres")',
+        "new PostgreSQLContainer<>(POSTGRES_DOCKER_IMAGE)",
+    )
+    for token in required_source_tokens:
+        if token not in source:
+            fail(f"PostgreSQL integration is missing explicit digest-image compatibility contract: {token}", errors)
 
     security = STABLE_GATES["security-gate"].read_text(encoding="utf-8")
     required_tokens = (
