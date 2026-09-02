@@ -73,6 +73,7 @@ def validate(errors: list[str]) -> None:
         r"grep -q '^libcrypto3-3\.5\.8-r0 '",
         r"grep -q '^libssl3-3\.5\.8-r0 '",
         "gosu nobody true",
+        "USER postgres",
     )
     for token in docker_tokens:
         _require(dockerfile, token, DOCKERFILE.relative_to(ROOT).as_posix(), errors)
@@ -83,6 +84,9 @@ def validate(errors: list[str]) -> None:
         errors.append("every PostgreSQL test image FROM reference must be digest-pinned")
     if re.search(r"(?mi)^\s*USER\s+root\s*$", dockerfile):
         errors.append("PostgreSQL test image must not add an explicit root USER declaration")
+    user_lines = [line.strip() for line in dockerfile.splitlines() if line.strip().startswith("USER ")]
+    if user_lines != ["USER postgres"]:
+        errors.append("PostgreSQL test image must declare postgres as its sole explicit final runtime user")
     if "apk info -v" in dockerfile:
         errors.append("PostgreSQL package version checks must use installed-package list output, not apk info metadata")
 
@@ -112,7 +116,7 @@ def main() -> int:
         return 1
     print(
         "PostgreSQL runtime provenance: Testcontainers build wiring, immutable bases, "
-        "gosu source/toolchain, exact OpenSSL patches, and Security image scan are consistent"
+        "gosu source/toolchain, exact OpenSSL patches, non-root runtime, and Security image scan are consistent"
     )
     return 0
 
