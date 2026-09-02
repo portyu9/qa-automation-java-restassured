@@ -1,0 +1,65 @@
+name: rest-linked-docs-fix
+
+on:
+  push:
+    branches: [docs/rest-linked-docs-truth]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: docs/rest-linked-docs-truth
+      - name: Correct linked architecture and strategy wording
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_exact(path, old, new, expected=1):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              actual = text.count(old)
+              if actual != expected:
+                  raise SystemExit(f'{path}: expected {expected} matches for {old!r}, found {actual}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace_exact(
+              'docs/ARCHITECTURE.md',
+              '- a pinned `postgres:<pinned-tag>` image;',
+              '- the repository-built `qa-restassured-postgres:16.15-hardened` image from `docker/postgres-test.Dockerfile`;'
+          )
+          replace_exact(
+              'docs/ARCHITECTURE.md',
+              'This prevents an unqualified a future unqualified Java release or a future Maven major environment from being interpreted as supported merely because it happens to compile.',
+              'This prevents a future unqualified Java release or Maven major from being interpreted as supported merely because it happens to compile.'
+          )
+          replace_exact(
+              'docs/TEST_STRATEGY.md',
+              'The image is pinned to `postgres:<pinned-tag>`.',
+              'The persistence boundary uses the repository-built `qa-restassured-postgres:16.15-hardened` image from `docker/postgres-test.Dockerfile`; the Security workflow independently rebuilds and scans that same tracked recipe.'
+          )
+          replace_exact(
+              'docs/TEST_STRATEGY.md',
+              'Maven Enforcer accepts only the repository-qualified Maven line. a future Maven major is not automatically supported because it is newer; it requires a compatibility change with lifecycle evidence.',
+              'Maven Enforcer accepts only the repository-qualified Maven line. A future Maven major is not automatically supported because it is newer; it requires a compatibility change with lifecycle evidence.'
+          )
+          replace_exact(
+              'docs/TEST_STRATEGY.md',
+              'Trivy gates fixed HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfiguration findings, and committed secret findings;',
+              'Trivy gates fixable HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfiguration findings, and committed secret findings;'
+          )
+      - name: Commit linked-document corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/rest-linked-docs-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/ARCHITECTURE.md docs/TEST_STRATEGY.md .github/workflows/rest-linked-docs-fix.yml
+          git commit -m 'docs: align REST linked docs with current runtime'
+          git push origin HEAD:docs/rest-linked-docs-truth
