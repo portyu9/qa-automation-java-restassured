@@ -15,6 +15,10 @@ concurrency:
   group: security-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  POSTGRES_TEST_IMAGE: qa-restassured-postgres:16.15-hardened
+  POSTGRES_TEST_DOCKERFILE: docker/postgres-test.Dockerfile
+
 jobs:
   codeql:
     name: CodeQL
@@ -164,38 +168,26 @@ jobs:
   postgres-image:
     name: PostgreSQL Testcontainers image
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Resolve digest-pinned image from integration source
+      - name: Validate tracked PostgreSQL runtime provenance
+        run: python3 .github/scripts/validate_postgres_runtime.py
+      - name: Prepare evidence directory
+        run: mkdir -p reports/security/postgres-image
+      - name: Build exact Testcontainers image
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          source = Path('src/test/java/com/example/db/PostgresIntegrationTest.java').read_text(encoding='utf-8')
-          match = re.search(r'POSTGRES_IMAGE\s*=\s*\n?\s*"([^"]+)"', source)
-          if not match:
-              raise SystemExit('PostgresIntegrationTest.java does not define POSTGRES_IMAGE')
-          image = match.group(1)
-          if not re.fullmatch(r'postgres:16\.15-alpine@sha256:[0-9a-f]{64}', image):
-              raise SystemExit(f'PostgreSQL runtime must use the governed versioned tag plus immutable digest: {image}')
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
-              handle.write(f'POSTGRES_IMAGE={image}\n')
-          print(f'Governed PostgreSQL image: {image}')
-          PY
-      - name: Prepare evidence directory
-        run: mkdir -p reports/security/postgres-image
+          docker build --pull=false -f "$POSTGRES_TEST_DOCKERFILE" -t "$POSTGRES_TEST_IMAGE" .
+          docker image inspect "$POSTGRES_TEST_IMAGE" > reports/security/postgres-image/image-inspect.json
       - name: Scan exact Testcontainers image for HIGH/CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
           scan-type: image
-          image-ref: ${{ env.POSTGRES_IMAGE }}
+          image-ref: ${{ env.POSTGRES_TEST_IMAGE }}
           scanners: vuln
           severity: HIGH,CRITICAL
           ignore-unfixed: true
@@ -208,18 +200,30 @@ jobs:
         run: |
           set -euo pipefail
           report="reports/security/postgres-image/trivy.json"
+          inspect="reports/security/postgres-image/image-inspect.json"
           summary="reports/security/postgres-image/summary.md"
-          [[ -n "${POSTGRES_IMAGE:-}" ]] || { echo 'PostgreSQL image provenance was not resolved' >&2; exit 1; }
+          [[ -s "$inspect" ]] || { echo 'Docker did not produce PostgreSQL image identity evidence' >&2; exit 1; }
           [[ -s "$report" ]] || { echo 'Trivy did not produce PostgreSQL image evidence' >&2; exit 1; }
-          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.74.0") and ((.Results // []) | type == "array") and (((.Results // []) | length) > 0)' "$report" >/dev/null
+          jq -e --arg image "$POSTGRES_TEST_IMAGE" '
+            (.SchemaVersion == 2)
+            and (.Trivy.Version == "0.74.0")
+            and (.ArtifactName == $image)
+            and ((.Results // []) | type == "array")
+            and (((.Results // []) | length) > 0)
+          ' "$report" >/dev/null
+          image_id=$(jq -er '.[0].Id' "$inspect")
           findings=$(jq '[.Results[]? | .Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' "$report")
           {
             echo '### PostgreSQL Testcontainers security gate'
             echo
-            echo "- Image: \`${POSTGRES_IMAGE}\`"
+            echo "- Local image: \`${POSTGRES_TEST_IMAGE}\`"
+            echo "- Image ID: \`${image_id}\`"
+            echo '- Upstream PostgreSQL: 16.15 Alpine, immutable index digest'
+            echo '- gosu: 1.19 exact upstream commit, rebuilt with digest-pinned Go 1.26.6 / CGO disabled'
+            echo '- OpenSSL: Alpine 3.24 libcrypto3/libssl3 3.5.8-r0'
             echo "- Fixed HIGH/CRITICAL findings: ${findings}"
             echo '- Scanner: Trivy v0.74.0 image mode'
-            echo '- Provenance: image value is parsed from the integration test source; tag-only or non-digest references fail before scanning'
+            echo '- Provenance: the same repository-owned Dockerfile is validated, built by Testcontainers in integration jobs, rebuilt here, and scanned without severity exceptions'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload PostgreSQL image security evidence
         if: always()
