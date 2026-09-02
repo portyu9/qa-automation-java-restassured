@@ -32,3 +32,5 @@ RUN set -eux; \
     apk list --installed libssl3 2>/dev/null | grep -q '^libssl3-3\.5\.8-r0 '; \
     gosu --version; \
     gosu nobody true
+
+USER postgres
