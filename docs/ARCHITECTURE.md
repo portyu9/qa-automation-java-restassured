@@ -96,7 +96,7 @@ An individual test may inspect a body to prove behavior without making that body
 
 The integration owns:
 
-- a pinned `postgres:<pinned-tag>` image;
+- the repository-built `qa-restassured-postgres:16.15-hardened` image from `docker/postgres-test.Dockerfile`;
 - an isolated container lifecycle;
 - a temporary test-owned table;
 - generated identity retrieval;
@@ -115,7 +115,7 @@ The project compiles with Java release 17 while runtime qualification is explici
 - additional qualified Java runtime: fast compatibility;
 - minimum supported Java runtime: fast compatibility in primary CI and full `verify` in extended CI.
 
-Maven Enforcer bounds Java and Maven to repository-qualified runtime lines. This prevents an unqualified a future unqualified Java release or a future Maven major environment from being interpreted as supported merely because it happens to compile.
+Maven Enforcer bounds Java and Maven to repository-qualified runtime lines. This prevents a future unqualified Java release or Maven major from being interpreted as supported merely because it happens to compile.
 
 The Maven Wrapper is part of provenance. The checked-in Maven Wrapper points to a repository-pinned Maven distribution and validates its SHA-256.
 
