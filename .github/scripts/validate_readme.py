@@ -125,6 +125,16 @@ def main() -> int:
     validate_postgres_runtime(errors)
 
     lower = text.lower()
+    for stale in ("postgres:<pinned-tag>",):
+        if stale in text:
+            fail(f"README contains stale PostgreSQL runtime wording: {stale}", errors)
+    for required_claim in (
+        "qa-restassured-postgres:16.15-hardened",
+        "docker/postgres-test.Dockerfile",
+        "PostgreSQL Testcontainers image gate",
+    ):
+        if required_claim not in text:
+            fail(f"README must document hardened PostgreSQL runtime contract: {required_claim}", errors)
     for claim in ("minimum supported java", "current qualified java", "maven wrapper"):
         if claim not in lower:
             fail(f"README must document versionless toolchain claim: {claim}", errors)
