@@ -287,8 +287,8 @@ Repository rules/settings are a separate governance layer. The workflows expose 
 Security controls remain independent because they answer different questions:
 
 - **CodeQL `security-extended`** analyzes Java source/data-flow behavior after a controlled test compilation;
-- **Maven test-dependency SBOM gate** uses repository-pinned CycloneDX Maven plugin with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with the repository-pinned Trivy scanner for fixed HIGH/CRITICAL vulnerabilities;
-- **PostgreSQL Testcontainers image gate** validates the tracked runtime provenance, rebuilds `qa-restassured-postgres:16.15-hardened`, and scans the actual image for fixed HIGH/CRITICAL vulnerabilities with retained image identity/evidence;
+- **Maven test-dependency SBOM gate** uses repository-pinned CycloneDX Maven plugin with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with the repository-pinned Trivy scanner for fixable HIGH/CRITICAL vulnerabilities;
+- **PostgreSQL Testcontainers image gate** validates the tracked runtime provenance, rebuilds `qa-restassured-postgres:16.15-hardened`, and scans the actual image for fixable HIGH/CRITICAL vulnerabilities with retained image identity/evidence;
 - **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;
 - **Dependency Review** evaluates newly introduced dependency risk on pull requests when GitHub Dependency graph is available;
 - **Maven Wrapper provenance** pins the repository-pinned Maven distribution and verifies its SHA-256 before execution;
@@ -328,7 +328,7 @@ Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execut
 - wrapper changes require deliberate version/checksum changes plus full lifecycle verification;
 - dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, hardened PostgreSQL image provenance/scanning when applicable, repository security, and documentation gates.
 
-Dependabot can update dependencies whose package coordinates remain stable, including the imported Jackson BOM. Migrations that rename modules or Java packages require deliberate code changes. a future Testcontainers major is such a migration and its major updates are intentionally excluded from automated Dependabot PRs while maintenance within the currently qualified Testcontainers major remains enabled.
+Dependabot can update dependencies whose package coordinates remain stable, including the imported Jackson BOM. Migrations that rename modules or Java packages require deliberate code changes. A future Testcontainers major is such a migration and its major updates are intentionally excluded from automated Dependabot PRs while maintenance within the currently qualified Testcontainers major remains enabled.
 
 ## Failure triage
 
@@ -346,12 +346,12 @@ Dependabot can update dependencies whose package coordinates remain stable, incl
 | Semantic assertion failure | API business/data contract |
 | Cookie-filter failure | Stateful HTTP semantics |
 | PostgreSQL runtime-provenance failure | Tracked Dockerfile/Testcontainers wiring, immutable upstream identity, gosu toolchain/source, OpenSSL patch floor, or non-root runtime drift |
-| PostgreSQL image security failure | Fixed HIGH/CRITICAL vulnerability in the exact repository-built test image |
+| PostgreSQL image security failure | Fixable HIGH/CRITICAL vulnerability in the exact repository-built test image |
 | PostgreSQL Failsafe failure | Container/driver/SQL/persistence boundary |
 | External-target-only failure | Environment/provider integration first |
 | CodeQL failure | Source-level security signal |
 | Maven SBOM validation failure | Resolved dependency scope/alignment evidence is missing or drifted |
-| Maven SBOM Trivy failure | Fixed HIGH/CRITICAL vulnerability exists in the resolved test dependency graph |
+| Maven SBOM Trivy failure | Fixable HIGH/CRITICAL vulnerability exists in the resolved test dependency graph |
 | Repository Trivy failure | HIGH/CRITICAL supported configuration finding or committed-secret signal |
 | Dependency Review unavailable | GitHub service limitation; not a synthetic pass for diff-aware analysis |
 | Documentation/workflow-pin failure | Repository governance or executable supply-chain drift |
