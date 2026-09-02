@@ -98,7 +98,7 @@ It must not automatically retain:
 
 The test creates connection-scoped temporary state, inserts an owned row, captures its generated identity, then queries that exact identity. This avoids row-order dependence, pre-existing IDs, and cleanup races.
 
-The image is pinned to `postgres:<pinned-tag>`.
+The persistence boundary uses the repository-built `qa-restassured-postgres:16.15-hardened` image from `docker/postgres-test.Dockerfile`; the Security workflow independently rebuilds and scans that same tracked recipe.
 
 Testcontainers remains on the currently qualified major line until a future-major migration proves runtime behavior, not just compilation. A future migration must verify Docker-client initialization, new module/package coordinates, minimum/current Java persistence execution, and security/dependency impact.
 
@@ -142,7 +142,7 @@ The Wrapper is authoritative:
 - the repository-pinned Maven distribution;
 - pinned Maven distribution SHA-256.
 
-Maven Enforcer accepts only the repository-qualified Maven line. a future Maven major is not automatically supported because it is newer; it requires a compatibility change with lifecycle evidence.
+Maven Enforcer accepts only the repository-qualified Maven line. A future Maven major is not automatically supported because it is newer; it requires a compatibility change with lifecycle evidence.
 
 ## Semantic evidence policy
 
@@ -185,7 +185,7 @@ Do not retain credentials or arbitrary provider payloads in generic diagnostics.
 Security signals remain separate from test retry policy:
 
 - CodeQL runs Java/Kotlin `security-extended` analysis;
-- Trivy gates fixed HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfiguration findings, and committed secret findings;
+- Trivy gates fixable HIGH/CRITICAL dependency findings, supported HIGH/CRITICAL misconfiguration findings, and committed secret findings;
 - Dependency Review gates newly introduced dependency risk when GitHub Dependency graph is available;
 - the Maven Wrapper checksum protects the Maven distribution;
 - the workflow-pin validator rejects mutable external GitHub Actions.
