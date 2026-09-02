@@ -38,7 +38,7 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 | Persistence | JDBC, PostgreSQL dialect, generated identity, owned row behavior | Testcontainers + PostgreSQL | Failsafe XML/text |
 | Runtime compatibility | Bytecode/runtime behavior across supported Java releases | supported Java runtimes + Maven Wrapper | Matrix/lifecycle reports |
 | Evidence integrity | Intended suites actually executed with clean terminal state | Repository-owned XML validator | Minimum-count + failure/error/skip checks |
-| Security | Java SAST, Maven test-dependency risk, repository policy/secret risk, PR dependency-change risk | CodeQL + CycloneDX/Trivy SBOM + repository Trivy + Dependency Review when available | Code scanning + retained SBOM/JSON/status |
+| Security | Java SAST, Maven test-dependency risk, hardened PostgreSQL runtime-image risk, repository policy/secret risk, and PR dependency-change risk | CodeQL + CycloneDX/Trivy SBOM + dedicated PostgreSQL image Trivy + repository Trivy + Dependency Review when available | Code scanning + retained SBOM/image/repository JSON + dependency-review status |
 | Documentation | README/workflow/governance consistency | Repository-local validator | Actions status |
 
 ## Architecture
@@ -57,7 +57,8 @@ flowchart LR
     RA --> WM[Dynamic-port WireMock fixture]
 
     DBTEST[PostgresIntegrationTest] --> TC[Testcontainers]
-    TC --> PG[(PostgreSQL)]
+    TC --> PGBUILD[Repository-owned hardened PostgreSQL image]
+    PGBUILD --> PG[(PostgreSQL)]
 
     WM --> SURE[Surefire XML evidence]
     PG --> FAIL[Failsafe XML evidence]
@@ -71,6 +72,7 @@ flowchart LR
     CODEQL[CodeQL] --> SG[Security / security-gate]
     BOM[CycloneDX test-scope SBOM] --> SBOMSCAN[Trivy SBOM vulnerability gate]
     SBOMSCAN --> SG
+    PGSCAN[Trivy PostgreSQL image gate] --> SG
     REPO[Trivy repository policy] --> SG
     DEP[Dependency Review when available] --> SG
     EVIDENCE --> CIG[CI / ci-gate]
@@ -91,7 +93,7 @@ The architecture deliberately keeps **library capability**, **application/test p
 | Stateful HTTP | REST Assured `CookieFilter` is scoped to the scenario that intentionally owns state. |
 | Assertion depth | Protocol, structure, semantics, and failure behavior are independent contracts. |
 | HTTP simulation | WireMock models service-boundary behavior; REST Assured itself is never mocked. |
-| Persistence | Testcontainers owns the PostgreSQL integration boundary; image `postgres:<pinned-tag>` is intentionally pinned. |
+| Persistence | Testcontainers builds the repository-owned `qa-restassured-postgres:16.15-hardened` image from `docker/postgres-test.Dockerfile`; immutable upstream image digests, the gosu source identity/toolchain, patched OpenSSL floor, and final non-root user are governed independently from the Java dependency graph. |
 | Lifecycle | Surefire owns fast tests; Failsafe owns `*IntegrationTest`. |
 | Evidence floor | Required fast evidence proves at least 14 executed Surefire tests; full lifecycle also proves at least 1 executed Failsafe test. |
 | Disabled tests | Required evidence fails when Maven XML reports skipped tests. |
@@ -234,7 +236,9 @@ WireMock stubs the **provider boundary**, not the HTTP client. Serialization, he
 
 `PostgresIntegrationTest` belongs to Failsafe and provisions real PostgreSQL only because driver, SQL dialect, generated identity, and query semantics are material. Test-owned state uses a temporary table and generated identity, so reruns do not depend on global row ordering or cleanup timing.
 
-The database image is pinned to `postgres:<pinned-tag>`. The repository intentionally retains **Testcontainers** until a safe future-major migration is demonstrated. A prior major-version migration compiled but failed during Docker-client initialization because of an incompatible assembled Jackson annotation runtime; the future-major PostgreSQL module/package coordinates also change. That is an explicit migration boundary, not a forgotten update.
+The database boundary is **repository-owned rather than a mutable upstream tag**. `PostgresIntegrationTest` asks Testcontainers to build `qa-restassured-postgres:16.15-hardened` from `docker/postgres-test.Dockerfile`. That recipe binds the PostgreSQL 16.15 base and Go builder to immutable digests, rebuilds gosu 1.19 from its exact upstream commit with CGO disabled, patches the governed Alpine OpenSSL packages, and finishes as the non-root `postgres` user. The Security workflow rebuilds and scans that same tracked image independently, so a green persistence test cannot silently excuse a vulnerable test-runtime image.
+
+The repository intentionally retains **Testcontainers** until a safe future-major migration is demonstrated. A prior major-version migration compiled but failed during Docker-client initialization because of an incompatible assembled Jackson annotation runtime; the future-major PostgreSQL module/package coordinates also change. That is an explicit migration boundary, not a forgotten update.
 
 A future Testcontainers major migration should therefore prove, at minimum:
 
@@ -274,7 +278,7 @@ The workflow internals can evolve while external status interfaces remain small 
 
 - `ci / ci-gate` aggregates minimum/additional Java compatibility and current-runtime full verification;
 - `extended / extended-gate` aggregates the minimum-supported-runtime full lifecycle;
-- `security / security-gate` aggregates CodeQL, Maven test-scope SBOM vulnerability scanning, repository Trivy policy scanning, and event-applicable Dependency Review/fallback behavior.
+- `security / security-gate` aggregates CodeQL, Maven test-scope SBOM vulnerability scanning, the exact hardened PostgreSQL Testcontainers image scan, repository Trivy policy scanning, and event-applicable Dependency Review/fallback behavior.
 
 Repository rules/settings are a separate governance layer. The workflows expose stable conclusions without implying that a particular repository rule is configured.
 
@@ -284,6 +288,7 @@ Security controls remain independent because they answer different questions:
 
 - **CodeQL `security-extended`** analyzes Java source/data-flow behavior after a controlled test compilation;
 - **Maven test-dependency SBOM gate** uses repository-pinned CycloneDX Maven plugin with test scope included, verifies governed REST Assured/JUnit/Testcontainers/PostgreSQL components plus Jackson BOM alignment, then scans that retained SBOM with the repository-pinned Trivy scanner for fixed HIGH/CRITICAL vulnerabilities;
+- **PostgreSQL Testcontainers image gate** validates the tracked runtime provenance, rebuilds `qa-restassured-postgres:16.15-hardened`, and scans the actual image for fixed HIGH/CRITICAL vulnerabilities with retained image identity/evidence;
 - **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;
 - **Dependency Review** evaluates newly introduced dependency risk on pull requests when GitHub Dependency graph is available;
 - **Maven Wrapper provenance** pins the repository-pinned Maven distribution and verifies its SHA-256 before execution;
@@ -304,7 +309,7 @@ The framework combines real HTTP and real relational-database execution with det
 | REST Assured API contracts | HTTP status, headers, payload semantics, schema checks, and client-facing error behavior execute through the governed API boundary | Passing API contracts do not prove browser behavior, upstream integrations, or production ingress/network policy |
 | JSON Schema validation | Provider responses retain the committed structural contract | Structural validity does not prove business correctness, authorization correctness, or semantic compatibility outside the asserted fields |
 | WireMock-controlled dependencies | Timeout, error, and dependency-response conditions are reproducible and attributable | A controlled stub proves the owned condition, not the current behavior of a live third-party service |
-| Testcontainers PostgreSQL integration | Repository/transaction behavior executes against a real PostgreSQL engine with isolated lifecycle ownership | It does not prove managed-service topology, replication, failover, production sizing, network policy, or migration safety in a deployed estate |
+| Testcontainers PostgreSQL integration | Repository/transaction behavior executes against a real PostgreSQL engine built from the governed hardened image recipe, with isolated lifecycle ownership | It does not prove managed-service topology, replication, failover, production sizing, network policy, or migration safety in a deployed estate |
 | Unit/integration lifecycle separation | Fast contracts and infrastructure-bearing tests retain distinct Maven lifecycle ownership and failure attribution | A green unit phase is not evidence that container/integration prerequisites are healthy, and the reverse is also true |
 | Dependency lock / resolved graph / SBOM evidence | The build records the dependency graph actually selected for the governed execution | A generated SBOM is inventory evidence, not a vulnerability verdict or proof that every runtime path loads every component |
 | Runtime compatibility lanes | The same governed suite executes across explicitly supported Java runtimes | Compatibility is scoped to exercised code paths; it does not guarantee behavior under unqualified future runtimes or JVM/environment tuning |
@@ -321,7 +326,7 @@ Dependabot maintains **Maven** and **GitHub Actions** dependencies. Maven execut
 - major upgrades remain attributable compatibility changes;
 - Actions are executable dependencies and remain immutable-SHA pinned;
 - wrapper changes require deliberate version/checksum changes plus full lifecycle verification;
-- dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, repository security, and documentation gates as applicable.
+- dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, hardened PostgreSQL image provenance/scanning when applicable, repository security, and documentation gates.
 
 Dependabot can update dependencies whose package coordinates remain stable, including the imported Jackson BOM. Migrations that rename modules or Java packages require deliberate code changes. a future Testcontainers major is such a migration and its major updates are intentionally excluded from automated Dependabot PRs while maintenance within the currently qualified Testcontainers major remains enabled.
 
@@ -340,6 +345,8 @@ Dependabot can update dependencies whose package coordinates remain stable, incl
 | JSON Schema failure | Structural compatibility or Jackson/schema-validator compatibility regression |
 | Semantic assertion failure | API business/data contract |
 | Cookie-filter failure | Stateful HTTP semantics |
+| PostgreSQL runtime-provenance failure | Tracked Dockerfile/Testcontainers wiring, immutable upstream identity, gosu toolchain/source, OpenSSL patch floor, or non-root runtime drift |
+| PostgreSQL image security failure | Fixed HIGH/CRITICAL vulnerability in the exact repository-built test image |
 | PostgreSQL Failsafe failure | Container/driver/SQL/persistence boundary |
 | External-target-only failure | Environment/provider integration first |
 | CodeQL failure | Source-level security signal |
