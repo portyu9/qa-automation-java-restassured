@@ -76,6 +76,18 @@ flowchart LR
     REPO[Trivy repository policy] --> SG
     DEP[Dependency Review when available] --> SG
     EVIDENCE --> CIG[CI / ci-gate]
+
+    classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
+    classDef policy fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
+    classDef runtime fill:#fff8c5,stroke:#9a6700,color:#24292f,stroke-width:1.5px;
+    classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
+    classDef gate fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
+    class TEST,DBTEST,J25,J17,J21 entry;
+    class CLIENT,NATIVE,SPEC,CFG,DIAG,TELE,COOKIE policy;
+    class RA,WM,TC,PGBUILD,PG runtime;
+    class SURE,FAIL,EVIDENCE evidence;
+    class CODEQL,BOM,SBOMSCAN,PGSCAN,REPO,DEP,SG,CIG gate;
+    linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
 The architecture deliberately keeps **library capability**, **application/test policy**, **external-system realism**, and **evidence validation** separate. REST Assured remains visible instead of being hidden behind a second HTTP DSL; containers are introduced only where database semantics are material; and CI validates report semantics after Maven exits successfully.
