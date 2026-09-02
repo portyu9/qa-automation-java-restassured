@@ -45,7 +45,9 @@ A Java API and persistence quality-engineering framework using **REST Assured, J
 
 ```mermaid
 flowchart LR
-    TEST[JUnit contracts] --> CLIENT[PostsApiClient]
+    CHANGE[Repository change] --> TEST[JUnit contracts]
+    CHANGE --> DBTEST[PostgresIntegrationTest]
+    TEST --> CLIENT[PostsApiClient]
     TEST --> NATIVE[Native REST Assured capabilities]
     CLIENT --> SPEC[ApiSpecs]
     NATIVE --> SPEC
@@ -56,7 +58,7 @@ flowchart LR
     SPEC --> RA[REST Assured]
     RA --> WM[Dynamic-port WireMock fixture]
 
-    DBTEST[PostgresIntegrationTest] --> TC[Testcontainers]
+    DBTEST --> TC[Testcontainers]
     TC --> PGBUILD[Repository-owned hardened PostgreSQL image]
     PGBUILD --> PG[(PostgreSQL)]
 
@@ -64,10 +66,16 @@ flowchart LR
     PG --> FAIL[Failsafe XML evidence]
     SURE --> EVIDENCE[Semantic evidence validator]
     FAIL --> EVIDENCE
+    EVIDENCE --> CIG[CI / ci-gate]
 
-    J25[current qualified Java full verify] --> EVIDENCE
-    J17[minimum supported Java full verify] --> EVIDENCE
-    J21[additional Java compatibility] --> EVIDENCE
+    CHANGE --> QUAL[Current + additional Java qualification]
+    QUAL --> CIG
+
+    CHANGE --> J17[Java 17 minimum-runtime full verify]
+    J17 --> EG[Extended / extended-gate]
+
+    CHANGE --> DOCS[README + evidence contracts]
+    DOCS --> DG[Docs / readme-contract]
 
     CODEQL[CodeQL] --> SG[Security / security-gate]
     BOM[CycloneDX test-scope SBOM] --> SBOMSCAN[Trivy SBOM vulnerability gate]
@@ -75,18 +83,22 @@ flowchart LR
     PGSCAN[Trivy PostgreSQL image gate] --> SG
     REPO[Trivy repository policy] --> SG
     DEP[Dependency Review when available] --> SG
-    EVIDENCE --> CIG[CI / ci-gate]
+
+    CIG --> RESULT[Qualified repository change]
+    EG --> RESULT
+    DG --> RESULT
+    SG --> RESULT
 
     classDef entry fill:#ddf4ff,stroke:#0969da,color:#24292f,stroke-width:1.5px;
     classDef policy fill:#fbefff,stroke:#8250df,color:#24292f,stroke-width:1.5px;
     classDef runtime fill:#fff8c5,stroke:#9a6700,color:#24292f,stroke-width:1.5px;
     classDef evidence fill:#dafbe1,stroke:#1a7f37,color:#24292f,stroke-width:1.5px;
     classDef gate fill:#ffebe9,stroke:#cf222e,color:#24292f,stroke-width:1.5px;
-    class TEST,DBTEST,J25,J17,J21 entry;
-    class CLIENT,NATIVE,SPEC,CFG,DIAG,TELE,COOKIE policy;
-    class RA,WM,TC,PGBUILD,PG runtime;
-    class SURE,FAIL,EVIDENCE evidence;
-    class CODEQL,BOM,SBOMSCAN,PGSCAN,REPO,DEP,SG,CIG gate;
+    class CHANGE entry;
+    class CLIENT,NATIVE,SPEC,CFG,DIAG,TELE,COOKIE,QUAL,DOCS policy;
+    class TEST,DBTEST,RA,WM,TC,PGBUILD,PG,J17 runtime;
+    class SURE,FAIL,EVIDENCE,RESULT evidence;
+    class CIG,EG,DG,CODEQL,BOM,SBOMSCAN,PGSCAN,REPO,DEP,SG gate;
     linkStyle default stroke:#57606a,stroke-width:1.4px;
 ```
 
