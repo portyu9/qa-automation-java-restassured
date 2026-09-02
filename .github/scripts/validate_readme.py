@@ -1,10 +1,12 @@
-"""Validate repository README contracts without third-party dependencies."""
+"""Validate repository README and executable workflow contracts."""
 from __future__ import annotations
 
 import re
 from html import unescape
 from pathlib import Path
 from urllib.parse import unquote
+
+from validate_postgres_runtime import validate as validate_postgres_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
@@ -24,10 +26,6 @@ STABLE_GATES = {
     "extended-gate": ROOT / ".github" / "workflows" / "extended.yml",
     "security-gate": ROOT / ".github" / "workflows" / "security.yml",
 }
-POSTGRES_SOURCE = ROOT / "src" / "test" / "java" / "com" / "example" / "db" / "PostgresIntegrationTest.java"
-POSTGRES_IMAGE_RE = re.compile(
-    r'POSTGRES_IMAGE\s*=\s*\n?\s*"(postgres:16\.15-alpine@sha256:[0-9a-f]{64})"'
-)
 
 
 def fail(message: str, errors: list[str]) -> None:
@@ -108,41 +106,6 @@ def validate_stable_gates(text: str, errors: list[str]) -> None:
             fail(f"README must document stable aggregate job `{gate}`", errors)
 
 
-def validate_postgres_runtime_contract(errors: list[str]) -> None:
-    if not POSTGRES_SOURCE.is_file():
-        fail("PostgreSQL integration source is missing", errors)
-        return
-
-    source = POSTGRES_SOURCE.read_text(encoding="utf-8")
-    match = POSTGRES_IMAGE_RE.search(source)
-    if not match:
-        fail("PostgreSQL integration must define a versioned postgres tag pinned by sha256 digest", errors)
-        return
-    required_source_tokens = (
-        "DockerImageName.parse(POSTGRES_IMAGE)",
-        '.asCompatibleSubstituteFor("postgres")',
-        "new PostgreSQLContainer<>(POSTGRES_DOCKER_IMAGE)",
-    )
-    for token in required_source_tokens:
-        if token not in source:
-            fail(f"PostgreSQL integration is missing explicit digest-image compatibility contract: {token}", errors)
-
-    security = STABLE_GATES["security-gate"].read_text(encoding="utf-8")
-    required_tokens = (
-        "  postgres-image:",
-        "Resolve digest-pinned image from integration source",
-        "PostgresIntegrationTest.java",
-        "scan-type: image",
-        "image-ref: ${{ env.POSTGRES_IMAGE }}",
-        "postgres-image-security-evidence-${{ github.run_id }}",
-        "needs: [codeql, maven-dependencies, postgres-image, trivy-repository, dependency-review]",
-        '[[ "$POSTGRES_IMAGE" == "success" ]]',
-    )
-    for token in required_tokens:
-        if token not in security:
-            fail(f"security workflow is missing PostgreSQL runtime-provenance contract: {token}", errors)
-
-
 def main() -> int:
     errors: list[str] = []
     if not README.is_file():
@@ -159,7 +122,7 @@ def main() -> int:
     validate_mermaid(text, errors)
     validate_repository_map(text, errors)
     validate_stable_gates(text, errors)
-    validate_postgres_runtime_contract(errors)
+    validate_postgres_runtime(errors)
 
     lower = text.lower()
     for claim in ("minimum supported java", "current qualified java", "maven wrapper"):
@@ -171,7 +134,10 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("README contract: links, badges, Mermaid, directory-only map, stable gates, toolchain claims, and PostgreSQL runtime provenance are consistent")
+    print(
+        "README contract: links, badges, Mermaid, directory-only map, stable gates, "
+        "toolchain claims, and PostgreSQL runtime provenance are consistent"
+    )
     return 0
 
 
