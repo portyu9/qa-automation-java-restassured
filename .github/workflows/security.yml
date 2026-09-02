@@ -15,6 +15,10 @@ concurrency:
   group: security-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  POSTGRES_TEST_IMAGE: qa-restassured-postgres:16.15-hardened
+  POSTGRES_TEST_DOCKERFILE: docker/postgres-test.Dockerfile
+
 jobs:
   codeql:
     name: CodeQL
@@ -161,6 +165,75 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  postgres-image:
+    name: PostgreSQL Testcontainers image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate tracked PostgreSQL runtime provenance
+        run: python3 .github/scripts/validate_postgres_runtime.py
+      - name: Prepare evidence directory
+        run: mkdir -p reports/security/postgres-image
+      - name: Build exact Testcontainers image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull=false -f "$POSTGRES_TEST_DOCKERFILE" -t "$POSTGRES_TEST_IMAGE" .
+          docker image inspect "$POSTGRES_TEST_IMAGE" > reports/security/postgres-image/image-inspect.json
+      - name: Scan exact Testcontainers image for HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: image
+          image-ref: ${{ env.POSTGRES_TEST_IMAGE }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: reports/security/postgres-image/trivy.json
+          exit-code: "1"
+      - name: Require attributed PostgreSQL image evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="reports/security/postgres-image/trivy.json"
+          inspect="reports/security/postgres-image/image-inspect.json"
+          summary="reports/security/postgres-image/summary.md"
+          [[ -s "$inspect" ]] || { echo 'Docker did not produce PostgreSQL image identity evidence' >&2; exit 1; }
+          [[ -s "$report" ]] || { echo 'Trivy did not produce PostgreSQL image evidence' >&2; exit 1; }
+          jq -e --arg image "$POSTGRES_TEST_IMAGE" '
+            (.SchemaVersion == 2)
+            and (.Trivy.Version == "0.74.0")
+            and (.ArtifactName == $image)
+            and ((.Results // []) | type == "array")
+            and (((.Results // []) | length) > 0)
+          ' "$report" >/dev/null
+          image_id=$(jq -er '.[0].Id' "$inspect")
+          findings=$(jq '[.Results[]? | .Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' "$report")
+          {
+            echo '### PostgreSQL Testcontainers security gate'
+            echo
+            echo "- Local image: \`${POSTGRES_TEST_IMAGE}\`"
+            echo "- Image ID: \`${image_id}\`"
+            echo '- Upstream PostgreSQL: 16.15 Alpine, immutable index digest'
+            echo '- gosu: 1.19 exact upstream commit, rebuilt with digest-pinned Go 1.26.6 / CGO disabled'
+            echo '- OpenSSL: Alpine 3.24 libcrypto3/libssl3 3.5.8-r0'
+            echo "- Fixed HIGH/CRITICAL findings: ${findings}"
+            echo '- Scanner: Trivy v0.74.0 image mode'
+            echo '- Provenance: the same repository-owned Dockerfile is validated, built by Testcontainers in integration jobs, rebuilt here, and scanned without severity exceptions'
+          } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload PostgreSQL image security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postgres-image-security-evidence-${{ github.run_id }}
+          path: reports/security/postgres-image/
+          if-no-files-found: error
+          retention-days: 14
+
   trivy-repository:
     name: Trivy repository policy
     runs-on: ubuntu-24.04
@@ -204,7 +277,7 @@ jobs:
             echo "| Gated secret findings | ${secrets} |"
             echo
             echo '- Scanner: Trivy v0.74.0'
-            echo '- Scope: repository configuration and committed secret material; Maven vulnerability scanning is a separate test-scope SBOM job'
+            echo '- Scope: repository configuration and committed secret material; Maven and PostgreSQL runtime vulnerability scanning are separate attributed jobs'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload repository security evidence
         if: always()
@@ -240,12 +313,12 @@ jobs:
             echo 'GitHub Dependency graph is available; running change-aware Dependency Review.'
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo '::warning::GitHub Dependency graph is unavailable; independent Maven SBOM vulnerability and repository Trivy gates remain authoritative, but change-aware Dependency Review cannot run.'
+            echo '::warning::GitHub Dependency graph is unavailable; independent Maven SBOM, PostgreSQL image, and repository Trivy gates remain authoritative, but change-aware Dependency Review cannot run.'
             {
               echo '### Dependency Review fallback'
               echo
               echo 'GitHub Dependency graph is unavailable for this repository, so pull-request diff analysis cannot run.'
-              echo 'Independent Maven test-scope SBOM vulnerability scanning and repository Trivy policy checks remain required. Enable Dependency graph in repository security settings to add change-aware review.'
+              echo 'Independent Maven test-scope SBOM vulnerability scanning, exact PostgreSQL Testcontainers image scanning, and repository Trivy policy checks remain required. Enable Dependency graph in repository security settings to add change-aware review.'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Review dependency changes
@@ -255,12 +328,12 @@ jobs:
           fail-on-severity: high
       - name: Confirm independent fallback gates
         if: steps.dependency-graph.outputs.available != 'true'
-        run: echo 'Dependency Review service unavailable; Maven SBOM vulnerability and repository Trivy jobs remain independent required gates.'
+        run: echo 'Dependency Review service unavailable; Maven SBOM, PostgreSQL image, and repository Trivy jobs remain independent required gates.'
 
   security-gate:
     name: security-gate
     if: always()
-    needs: [codeql, maven-dependencies, trivy-repository, dependency-review]
+    needs: [codeql, maven-dependencies, postgres-image, trivy-repository, dependency-review]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -268,6 +341,7 @@ jobs:
         env:
           CODEQL: ${{ needs.codeql.result }}
           MAVEN_DEPENDENCIES: ${{ needs.maven-dependencies.result }}
+          POSTGRES_IMAGE: ${{ needs.postgres-image.result }}
           TRIVY_REPOSITORY: ${{ needs.trivy-repository.result }}
           DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
           EVENT: ${{ github.event_name }}
@@ -276,6 +350,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$MAVEN_DEPENDENCIES" == "success" ]] || { echo "maven-dependencies=$MAVEN_DEPENDENCIES"; exit 1; }
+          [[ "$POSTGRES_IMAGE" == "success" ]] || { echo "postgres-image=$POSTGRES_IMAGE"; exit 1; }
           [[ "$TRIVY_REPOSITORY" == "success" ]] || { echo "trivy-repository=$TRIVY_REPOSITORY"; exit 1; }
           if [[ "$SAME_REPOSITORY_PR" == "true" ]]; then
             [[ "$CODEQL" == "success" ]] || { echo "codeql=$CODEQL"; exit 1; }

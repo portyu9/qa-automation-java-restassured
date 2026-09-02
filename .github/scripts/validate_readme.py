@@ -1,10 +1,12 @@
-"""Validate repository README contracts without third-party dependencies."""
+"""Validate repository README and executable workflow contracts."""
 from __future__ import annotations
 
 import re
 from html import unescape
 from pathlib import Path
 from urllib.parse import unquote
+
+from validate_postgres_runtime import validate as validate_postgres_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
@@ -120,6 +122,7 @@ def main() -> int:
     validate_mermaid(text, errors)
     validate_repository_map(text, errors)
     validate_stable_gates(text, errors)
+    validate_postgres_runtime(errors)
 
     lower = text.lower()
     for claim in ("minimum supported java", "current qualified java", "maven wrapper"):
@@ -131,7 +134,10 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("README contract: links, badges, Mermaid, directory-only map, stable gates, and toolchain claims are consistent")
+    print(
+        "README contract: links, badges, Mermaid, directory-only map, stable gates, "
+        "toolchain claims, and PostgreSQL runtime provenance are consistent"
+    )
     return 0
 
 
