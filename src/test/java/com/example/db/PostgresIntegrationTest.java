@@ -5,8 +5,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.images.builder.ImageFromDockerfile;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -25,11 +27,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("PostgreSQL integration contracts")
 public class PostgresIntegrationTest {
 
-    private static final String POSTGRES_IMAGE =
-            "postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685";
+    private static final String POSTGRES_IMAGE = "qa-restassured-postgres:16.15-hardened";
+    private static final Path POSTGRES_DOCKERFILE = Path.of("docker/postgres-test.Dockerfile");
 
-    private static final DockerImageName POSTGRES_DOCKER_IMAGE = DockerImageName.parse(POSTGRES_IMAGE)
-            .asCompatibleSubstituteFor("postgres");
+    private static final ImageFromDockerfile POSTGRES_IMAGE_BUILD =
+            new ImageFromDockerfile(POSTGRES_IMAGE, false)
+                    .withDockerfile(POSTGRES_DOCKERFILE);
+
+    private static final DockerImageName POSTGRES_DOCKER_IMAGE =
+            DockerImageName.parse(POSTGRES_IMAGE_BUILD.get())
+                    .asCompatibleSubstituteFor("postgres");
 
     private static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(POSTGRES_DOCKER_IMAGE)
             .withDatabaseName("testdb")
