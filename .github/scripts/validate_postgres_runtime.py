@@ -70,8 +70,8 @@ def validate(errors: list[str]) -> None:
         "COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu",
         f"'libcrypto3={OPENSSL_VERSION}'",
         f"'libssl3={OPENSSL_VERSION}'",
-        f"'libcrypto3-{OPENSSL_VERSION}'",
-        f"'libssl3-{OPENSSL_VERSION}'",
+        r"grep -q '^libcrypto3-3\.5\.8-r0 '",
+        r"grep -q '^libssl3-3\.5\.8-r0 '",
         "gosu nobody true",
     )
     for token in docker_tokens:
@@ -81,6 +81,10 @@ def validate(errors: list[str]) -> None:
         errors.append("PostgreSQL test image must not use a floating apk upgrade operation")
     if re.search(r"^FROM\s+[^\n@]+$", dockerfile, re.MULTILINE):
         errors.append("every PostgreSQL test image FROM reference must be digest-pinned")
+    if re.search(r"(?mi)^\s*USER\s+root\s*$", dockerfile):
+        errors.append("PostgreSQL test image must not add an explicit root USER declaration")
+    if "apk info -v" in dockerfile:
+        errors.append("PostgreSQL package version checks must use installed-package list output, not apk info metadata")
 
     security_tokens = (
         "  postgres-image:",
