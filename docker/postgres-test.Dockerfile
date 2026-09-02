@@ -22,14 +22,13 @@ RUN set -eux; \
 
 FROM postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
 
-USER root
 COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 
 RUN set -eux; \
     apk add --no-cache \
         'libcrypto3=3.5.8-r0' \
         'libssl3=3.5.8-r0'; \
-    test "$(apk info -v libcrypto3)" = 'libcrypto3-3.5.8-r0'; \
-    test "$(apk info -v libssl3)" = 'libssl3-3.5.8-r0'; \
+    apk list --installed libcrypto3 2>/dev/null | grep -q '^libcrypto3-3\.5\.8-r0 '; \
+    apk list --installed libssl3 2>/dev/null | grep -q '^libssl3-3\.5\.8-r0 '; \
     gosu --version; \
     gosu nobody true
