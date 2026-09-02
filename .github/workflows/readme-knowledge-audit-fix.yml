@@ -1,0 +1,98 @@
+name: readme-knowledge-audit-fix
+
+on:
+  push:
+    branches: [docs/readme-knowledge-audit]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: docs/readme-knowledge-audit
+      - name: Apply audited README corrections
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_exact(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one exact match, found {count}: {old[:80]!r}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace_exact(
+              'README.md',
+              '| Security | Java SAST, Maven test-dependency risk, repository policy/secret risk, PR dependency-change risk | CodeQL + CycloneDX/Trivy SBOM + repository Trivy + Dependency Review when available | Code scanning + retained SBOM/JSON/status |',
+              '| Security | Java SAST, Maven test-dependency risk, hardened PostgreSQL runtime-image risk, repository policy/secret risk, and PR dependency-change risk | CodeQL + CycloneDX/Trivy SBOM + dedicated PostgreSQL image Trivy + repository Trivy + Dependency Review when available | Code scanning + retained SBOM/image/repository JSON + dependency-review status |'
+          )
+          replace_exact(
+              'README.md',
+              '    DBTEST[PostgresIntegrationTest] --> TC[Testcontainers]\n    TC --> PG[(PostgreSQL)]',
+              '    DBTEST[PostgresIntegrationTest] --> TC[Testcontainers]\n    TC --> PGBUILD[Repository-owned hardened PostgreSQL image]\n    PGBUILD --> PG[(PostgreSQL)]'
+          )
+          replace_exact(
+              'README.md',
+              '    REPO[Trivy repository policy] --> SG\n    DEP[Dependency Review when available] --> SG',
+              '    PGSCAN[Trivy PostgreSQL image gate] --> SG\n    REPO[Trivy repository policy] --> SG\n    DEP[Dependency Review when available] --> SG'
+          )
+          replace_exact(
+              'README.md',
+              '| Persistence | Testcontainers owns the PostgreSQL integration boundary; image `postgres:<pinned-tag>` is intentionally pinned. |',
+              '| Persistence | Testcontainers builds the repository-owned `qa-restassured-postgres:16.15-hardened` image from `docker/postgres-test.Dockerfile`; immutable upstream image digests, the gosu source identity/toolchain, patched OpenSSL floor, and final non-root user are governed independently from the Java dependency graph. |'
+          )
+          replace_exact(
+              'README.md',
+              'The database image is pinned to `postgres:<pinned-tag>`. The repository intentionally retains **Testcontainers** until a safe future-major migration is demonstrated.',
+              'The database boundary is **repository-owned rather than a mutable upstream tag**. `PostgresIntegrationTest` asks Testcontainers to build `qa-restassured-postgres:16.15-hardened` from `docker/postgres-test.Dockerfile`. That recipe binds the PostgreSQL 16.15 base and Go builder to immutable digests, rebuilds gosu 1.19 from its exact upstream commit with CGO disabled, patches the governed Alpine OpenSSL packages, and finishes as the non-root `postgres` user. The Security workflow rebuilds and scans that same tracked image independently, so a green persistence test cannot silently excuse a vulnerable test-runtime image.\n\nThe repository intentionally retains **Testcontainers** until a safe future-major migration is demonstrated.'
+          )
+          replace_exact(
+              'README.md',
+              '- `security / security-gate` aggregates CodeQL, Maven test-scope SBOM vulnerability scanning, repository Trivy policy scanning, and event-applicable Dependency Review/fallback behavior.',
+              '- `security / security-gate` aggregates CodeQL, Maven test-scope SBOM vulnerability scanning, the exact hardened PostgreSQL Testcontainers image scan, repository Trivy policy scanning, and event-applicable Dependency Review/fallback behavior.'
+          )
+          replace_exact(
+              'README.md',
+              '- **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;',
+              '- **PostgreSQL Testcontainers image gate** validates the tracked runtime provenance, rebuilds `qa-restassured-postgres:16.15-hardened`, and scans the actual image for fixed HIGH/CRITICAL vulnerabilities with retained image identity/evidence;\n- **repository Trivy policy** scans committed repository configuration and secret material independently of Maven dependency resolution;'
+          )
+          replace_exact(
+              'README.md',
+              '| Testcontainers PostgreSQL integration | Repository/transaction behavior executes against a real PostgreSQL engine with isolated lifecycle ownership | It does not prove managed-service topology, replication, failover, production sizing, network policy, or migration safety in a deployed estate |',
+              '| Testcontainers PostgreSQL integration | Repository/transaction behavior executes against a real PostgreSQL engine built from the governed hardened image recipe, with isolated lifecycle ownership | It does not prove managed-service topology, replication, failover, production sizing, network policy, or migration safety in a deployed estate |'
+          )
+          replace_exact(
+              'README.md',
+              '- dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, repository security, and documentation gates as applicable.',
+              '- dependency PRs must satisfy Enforcer, compilation, semantic Surefire/Failsafe evidence, compatibility, test-scope SBOM vulnerability scanning, hardened PostgreSQL image provenance/scanning when applicable, repository security, and documentation gates.'
+          )
+          replace_exact(
+              'README.md',
+              '| PostgreSQL Failsafe failure | Container/driver/SQL/persistence boundary |',
+              '| PostgreSQL runtime-provenance failure | Tracked Dockerfile/Testcontainers wiring, immutable upstream identity, gosu toolchain/source, OpenSSL patch floor, or non-root runtime drift |\n| PostgreSQL image security failure | Fixed HIGH/CRITICAL vulnerability in the exact repository-built test image |\n| PostgreSQL Failsafe failure | Container/driver/SQL/persistence boundary |'
+          )
+
+          validator = Path('.github/scripts/validate_readme.py')
+          text = validator.read_text(encoding='utf-8')
+          marker = '    lower = text.lower()\n    for claim in ("minimum supported java", "current qualified java", "maven wrapper"):'
+          insertion = '''    lower = text.lower()\n    for stale in ("postgres:<pinned-tag>",):\n        if stale in text:\n            fail(f"README contains stale PostgreSQL runtime wording: {stale}", errors)\n    for required_claim in (\n        "qa-restassured-postgres:16.15-hardened",\n        "docker/postgres-test.Dockerfile",\n        "PostgreSQL Testcontainers image gate",\n    ):\n        if required_claim not in text:\n            fail(f"README must document hardened PostgreSQL runtime contract: {required_claim}", errors)\n    for claim in ("minimum supported java", "current qualified java", "maven wrapper"):'''
+          if text.count(marker) != 1:
+              raise SystemExit('validator marker did not match exactly once')
+          validator.write_text(text.replace(marker, insertion), encoding='utf-8')
+      - name: Commit branch-only documentation corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/readme-knowledge-audit-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md .github/scripts/validate_readme.py .github/workflows/readme-knowledge-audit-fix.yml
+          git commit -m 'docs: align README with hardened PostgreSQL runtime'
+          git push origin HEAD:docs/readme-knowledge-audit
