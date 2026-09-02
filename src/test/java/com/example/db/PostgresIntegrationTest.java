@@ -24,7 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("PostgreSQL integration contracts")
 public class PostgresIntegrationTest {
 
-    private static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16.15-alpine")
+    private static final String POSTGRES_IMAGE =
+            "postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685";
+
+    private static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(POSTGRES_IMAGE)
             .withDatabaseName("testdb")
             .withUsername("test")
             .withPassword("test");
