@@ -79,6 +79,8 @@ jobs:
           cache: maven
       - name: Validate immutable workflow dependencies
         run: python3 .github/scripts/validate_workflow_pins.py
+      - name: Validate qualified Java runtime policy
+        run: python3 .github/scripts/validate_runtime_policy.py
       - name: Verify checksum-pinned Maven wrapper
         run: ./mvnw -v
       - name: Run full lifecycle including local HTTP and PostgreSQL integration contracts
