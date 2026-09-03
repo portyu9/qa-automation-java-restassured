@@ -94,7 +94,10 @@
             <goals><goal>enforce</goal></goals>
             <configuration>
               <rules>
-                <requireJavaVersion><version>[17,26)</version></requireJavaVersion>
+                <requireJavaVersion>
+                  <version>[17,18),[21,22),[25,26)</version>
+                  <message>Java runtime must be one of the explicitly qualified major lines: 17, 21, or 25.</message>
+                </requireJavaVersion>
                 <requireMavenVersion><version>[3.9,4)</version></requireMavenVersion>
               </rules>
             </configuration>
