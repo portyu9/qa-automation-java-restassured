@@ -22,6 +22,7 @@ POSTGRES_BASE = (
 GOSU_TAG = "1.19"
 GOSU_COMMIT = "6456aaa0f3c854d199d0f037f068eb97515b7513"
 OPENSSL_VERSION = "3.5.8-r0"
+LIBUUID_VERSION = "2.42.3-r1"
 
 
 def _require(text: str, token: str, surface: str, errors: list[str]) -> None:
@@ -70,8 +71,10 @@ def validate(errors: list[str]) -> None:
         "COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu",
         f"'libcrypto3={OPENSSL_VERSION}'",
         f"'libssl3={OPENSSL_VERSION}'",
+        f"'libuuid={LIBUUID_VERSION}'",
         r"grep -q '^libcrypto3-3\.5\.8-r0 '",
         r"grep -q '^libssl3-3\.5\.8-r0 '",
+        r"grep -q '^libuuid-2\.42\.3-r1 '",
         "gosu nobody true",
         "USER postgres",
     )
@@ -116,7 +119,7 @@ def main() -> int:
         return 1
     print(
         "PostgreSQL runtime provenance: Testcontainers build wiring, immutable bases, "
-        "gosu source/toolchain, exact OpenSSL patches, non-root runtime, and Security image scan are consistent"
+        "gosu source/toolchain, exact security package patches, non-root runtime, and Security image scan are consistent"
     )
     return 0
 
