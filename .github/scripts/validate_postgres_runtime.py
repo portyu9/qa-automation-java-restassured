@@ -47,7 +47,8 @@ def validate(errors: list[str]) -> None:
         ".withDockerfile(POSTGRES_DOCKERFILE)",
         "DockerImageName.parse(POSTGRES_IMAGE_BUILD.get())",
         '.asCompatibleSubstituteFor("postgres")',
-        "new PostgreSQLContainer<>(POSTGRES_DOCKER_IMAGE)",
+        "import org.testcontainers.postgresql.PostgreSQLContainer;",
+        "new PostgreSQLContainer(POSTGRES_DOCKER_IMAGE)",
     )
     for token in source_tokens:
         _require(source, token, SOURCE.relative_to(ROOT).as_posix(), errors)

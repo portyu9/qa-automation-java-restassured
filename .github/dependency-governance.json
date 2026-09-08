@@ -60,7 +60,7 @@
         "pom.xml"
       ],
       "mode": "manual",
-      "reason": "pom.xml co-locates dependency versions, shared family properties, BOM management, Maven plugin versions, runtime enforcement, and test lifecycle policy; Testcontainers major migration is also deliberately held. A bot-only Maven diff is therefore reviewed by humans instead of being represented as autonomously safe."
+      "reason": "pom.xml co-locates dependency versions, shared family properties, BOM management, Maven plugin versions, runtime enforcement, and test lifecycle policy. A bot-only Maven diff is therefore reviewed by humans instead of being represented as autonomously safe."
     },
     "github-actions": {
       "workflowPrefix": ".github/workflows/",

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.images.builder.ImageFromDockerfile;
 import org.testcontainers.utility.DockerImageName;
 
@@ -38,7 +38,7 @@ public class PostgresIntegrationTest {
             DockerImageName.parse(POSTGRES_IMAGE_BUILD.get())
                     .asCompatibleSubstituteFor("postgres");
 
-    private static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(POSTGRES_DOCKER_IMAGE)
+    private static final PostgreSQLContainer postgres = new PostgreSQLContainer(POSTGRES_DOCKER_IMAGE)
             .withDatabaseName("testdb")
             .withUsername("test")
             .withPassword("test");
