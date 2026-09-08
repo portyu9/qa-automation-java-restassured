@@ -107,7 +107,7 @@ jobs:
             echo "- Job status: \`${JOB_STATUS}\`"
             echo '- Maven: `3.9.16` via checksum-pinned Wrapper 3.3.4'
             echo '- API target: repository-owned dynamic-port WireMock fixture'
-            echo '- Persistence: Testcontainers 1.21.4 + PostgreSQL 16.15'
+            echo '- Persistence: Testcontainers 2.0.5 + PostgreSQL 16.15'
             echo '- Evidence: at least 14 executed Surefire tests + 1 executed Failsafe test, zero failures/errors/skips'
           } | tee reports/ci-summary-java-25.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload current-LTS evidence
