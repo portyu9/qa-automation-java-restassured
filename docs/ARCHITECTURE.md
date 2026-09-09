@@ -26,6 +26,16 @@ flowchart LR
     PG --> FAIL[Failsafe reports]
     SURE --> EVIDENCE[Maven evidence validator]
     FAIL --> EVIDENCE
+
+    classDef entry fill:#DDF4FF,stroke:#0969DA,color:#24292F,stroke-width:1.5px;
+    classDef policy fill:#FBEFFF,stroke:#8250DF,color:#24292F,stroke-width:1.5px;
+    classDef runtime fill:#FFF8C5,stroke:#9A6700,color:#24292F,stroke-width:1.5px;
+    classDef evidence fill:#DAFBE1,stroke:#1A7F37,color:#24292F,stroke-width:1.5px;
+    class JUNIT,DB entry;
+    class CLIENT,NATIVE,SPECS,CFG,DIAG,TELE,COOKIE policy;
+    class RA,WM,TC,PG runtime;
+    class SURE,FAIL,EVIDENCE evidence;
+    linkStyle default stroke:#57606A,stroke-width:1.4px;
 ```
 
 ## Configuration boundary
@@ -103,21 +113,21 @@ The integration owns:
 - parameterized insert/select behavior;
 - deterministic cleanup through connection/container lifecycle.
 
-The repository deliberately remains on Testcontainers. The prior major-version migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and the future-major module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
+The repository deliberately remains on its qualified Testcontainers major. A prior future-major migration demonstrated that compile success was insufficient: Docker-client initialization failed because the assembled runtime carried incompatible Jackson annotation behavior, and module/package coordinates changed. A future migration must prove runtime compatibility, not merely dependency resolution.
 
 ## Maven lifecycle boundary
 
 Surefire owns fast API/framework contracts. Failsafe owns `*IntegrationTest` and the PostgreSQL container boundary.
 
-The project compiles with Java release 17 while runtime qualification is explicit:
+The project compiles with its minimum Java release policy while runtime qualification is explicit:
 
 - current qualified Java runtime: complete primary `verify` lifecycle;
 - additional qualified Java runtime: fast compatibility;
 - minimum supported Java runtime: fast compatibility in primary CI and full `verify` in extended CI.
 
-Maven Enforcer bounds Java and Maven to repository-qualified runtime lines. This prevents a future unqualified Java release or Maven major from being interpreted as supported merely because it happens to compile.
+Maven Enforcer bounds Java and Maven to repository-qualified runtime lines. This prevents an unqualified Java release or Maven major from being interpreted as supported merely because it happens to compile.
 
-The Maven Wrapper is part of provenance. The checked-in Maven Wrapper points to a repository-pinned Maven distribution and validates its SHA-256.
+The Maven Wrapper is part of provenance and validates its repository-pinned distribution checksum.
 
 ## Evidence boundary
 
@@ -133,33 +143,33 @@ Maven process success and artifact upload are not treated as sufficient evidence
 - zero errors;
 - zero skipped tests.
 
-The floors are based on the current intended suite. They protect against test-discovery regressions, accidental naming changes, skipped integration infrastructure, or CI configuration that uploads an empty report directory.
-
-Artifacts use `if-no-files-found: error`, so evidence disappearance is itself a failure.
+The floors protect against test-discovery regressions, accidental naming changes, skipped integration infrastructure, or CI configuration that uploads an empty report directory. Artifacts use `if-no-files-found: error`.
 
 ## Runtime qualification model
 
 Runtime matrices should change one meaningful risk dimension at a time.
 
-The primary contract is full verification on the current qualified Java runtime because it should exercise the entire supported framework, including Testcontainers. The minimum supported runtime receives a full extended lifecycle, while an additional qualified runtime provides a fast compatibility signal.
+The primary contract is full verification on the current qualified Java runtime because it exercises the complete supported framework, including Testcontainers. The minimum supported runtime receives a full extended lifecycle, while an additional qualified runtime provides a fast compatibility signal.
 
-This gives three useful failure interpretations:
+This gives useful failure interpretations:
 
 - minimum/additional-runtime fast-only failure → compatibility/API assumption;
-- current-runtime full-only failure → current-LTS or integration interaction;
+- current-runtime full-only failure → current runtime or integration interaction;
 - minimum-runtime extended-full-only failure → minimum-runtime persistence interaction.
 
 ## Security boundary
 
 Security controls remain independent:
 
-- CodeQL `security-extended` analyzes Java source/data flow after a controlled Maven compilation;
-- Trivy scans repository dependencies, supported configuration, and committed secret material at HIGH/CRITICAL severity;
-- Dependency Review analyzes newly introduced dependency changes when GitHub Dependency graph is available;
+- CodeQL analyzes Java source/data flow after controlled Maven compilation;
+- CycloneDX + Trivy validate and scan the resolved Maven test-scope dependency graph;
+- the PostgreSQL Testcontainers image gate scans the exact hardened repository-built test image;
+- repository Trivy policy covers supported configuration and committed-secret risk;
+- Dependency Review analyzes newly introduced dependencies when GitHub Dependency graph is available;
 - Maven Wrapper checksum validation protects build-tool provenance;
 - `.github/scripts/validate_workflow_pins.py` rejects mutable external Action references.
 
-Trivy is fail-closed if its expected JSON report is absent. Dependency Review availability is explicit: when GitHub Dependency graph is unavailable, that diff-aware control is recorded as unavailable rather than silently represented by a whole-repository scan.
+Dependency Review availability is explicit: when GitHub Dependency graph is unavailable, diff-aware analysis is recorded as unavailable rather than replaced by a whole-repository scan.
 
 ## Stable workflow interfaces
 
