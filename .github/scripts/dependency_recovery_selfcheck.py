@@ -210,6 +210,16 @@ class RecoverySelfCheck(unittest.TestCase):
             "Upload repository security evidence",
         }
         self.assertEqual(set(RECOVERY["transientSteps"]), expected)
+        for attempts in (1, 3, 4):
+            self.assertTrue(
+                validate_recovery_config({**RECOVERY, "maxRunAttempts": attempts}),
+                f"maxRunAttempts={attempts} must fail closed",
+            )
+        unknown = {
+            **RECOVERY,
+            "transientSteps": [*RECOVERY["transientSteps"], "Future Maven bootstrap"],
+        }
+        self.assertTrue(validate_recovery_config(unknown))
         for forbidden in (
             "Verify checksum-pinned Maven wrapper",
             "Fast API and framework tests against repository-owned WireMock fixtures",
@@ -227,7 +237,14 @@ class RecoverySelfCheck(unittest.TestCase):
             "Evaluate security jobs",
         ):
             self.assertNotIn(forbidden, RECOVERY["transientSteps"], forbidden)
-        self.assertTrue(validate_recovery_config({**RECOVERY, "maxRunAttempts": 4}))
+        invalid = {
+            **RECOVERY,
+            "transientSteps": [
+                *RECOVERY["transientSteps"],
+                "Fast API and framework tests against repository-owned WireMock fixtures",
+            ],
+        }
+        self.assertTrue(validate_recovery_config(invalid))
 
     def test_signature_model_is_narrow_and_blockers_win(self) -> None:
         self.assertEqual(matching_transient_signatures("npm error code EAI_AGAIN"), ["dns-eai-again"])
