@@ -50,8 +50,11 @@
     ".github/workflows/security.yml",
     ".github/workflows/dependency-governance.yml",
     ".github/dependency-governance.json",
+    ".github/dependency-recovery.json",
     ".github/scripts/dependency_governance.py",
     ".github/scripts/dependency_governance_selfcheck.py",
+    ".github/scripts/dependency_recovery.py",
+    ".github/scripts/dependency_recovery_selfcheck.py",
     ".github/dependabot.yml"
   ],
   "ecosystems": {
