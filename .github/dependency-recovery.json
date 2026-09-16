@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "maxRunAttempts": 2,
+  "transientSteps": [
+    "Set up Java 25 LTS",
+    "Upload compatibility evidence",
+    "Upload current-LTS evidence",
+    "Upload extended evidence",
+    "Upload Maven dependency security evidence",
+    "Upload PostgreSQL image security evidence",
+    "Upload repository security evidence"
+  ]
+}
