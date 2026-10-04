@@ -55,15 +55,23 @@
     ".github/scripts/dependency_governance_selfcheck.py",
     ".github/scripts/dependency_recovery.py",
     ".github/scripts/dependency_recovery_selfcheck.py",
-    ".github/dependabot.yml"
+    ".github/dependabot.yml",
+    ".github/scripts/validate_codeql_sarif.py",
+    ".github/scripts/validate_codeql_sarif_selfcheck.py",
+    ".github/scripts/validate_security_stack.py"
   ],
   "ecosystems": {
     "maven": {
       "files": [
         "pom.xml"
       ],
-      "mode": "manual",
-      "reason": "pom.xml co-locates dependency versions, shared family properties, BOM management, Maven plugin versions, runtime enforcement, and test lifecycle policy. A bot-only Maven diff is therefore reviewed by humans instead of being represented as autonomously safe."
+      "mode": "semantic",
+      "allowedUpdateTypes": [
+        "version-update:semver-patch",
+        "version-update:semver-minor",
+        "security-update:semver-patch",
+        "security-update:semver-minor"
+      ]
     },
     "github-actions": {
       "workflowPrefix": ".github/workflows/",
@@ -72,5 +80,8 @@
         ".yaml"
       ]
     }
-  }
+  },
+  "ownerApprovalRequired": true,
+  "ownerApprovalLogin": "portyu9",
+  "ownerApprovalUserId": 35150859
 }
