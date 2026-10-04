@@ -21,7 +21,7 @@ POSTGRES_BASE = (
 )
 GOSU_TAG = "1.19"
 GOSU_COMMIT = "6456aaa0f3c854d199d0f037f068eb97515b7513"
-OPENSSL_VERSION = "3.5.8-r0"
+OPENSSL_VERSION = "3.5.9-r0"
 LIBUUID_VERSION = "2.42.3-r1"
 
 
@@ -73,8 +73,8 @@ def validate(errors: list[str]) -> None:
         f"'libcrypto3={OPENSSL_VERSION}'",
         f"'libssl3={OPENSSL_VERSION}'",
         f"'libuuid={LIBUUID_VERSION}'",
-        r"grep -q '^libcrypto3-3\.5\.8-r0 '",
-        r"grep -q '^libssl3-3\.5\.8-r0 '",
+        r"grep -q '^libcrypto3-3\.5\.9-r0 '",
+        r"grep -q '^libssl3-3\.5\.9-r0 '",
         r"grep -q '^libuuid-2\.42\.3-r1 '",
         "gosu nobody true",
         "USER postgres",
@@ -103,7 +103,7 @@ def validate(errors: list[str]) -> None:
         "scan-type: image",
         "image-ref: ${{ env.POSTGRES_TEST_IMAGE }}",
         "postgres-image-security-evidence-${{ github.run_id }}",
-        "needs: [codeql, maven-dependencies, postgres-image, trivy-repository, dependency-review]",
+        "needs: [codeql-java, codeql-automation, maven-dependencies, postgres-image, trivy-repository, dependency-review]",
         '[[ "$POSTGRES_IMAGE" == "success" ]]',
     )
     for token in security_tokens:

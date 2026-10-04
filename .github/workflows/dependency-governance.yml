@@ -1,6 +1,8 @@
 name: dependency-governance
 
 on:
+  push:
+    branches: [main]
   pull_request:
     paths:
       - '.github/dependabot.yml'
@@ -10,14 +12,18 @@ on:
       - '.github/scripts/dependency_governance_selfcheck.py'
       - '.github/scripts/dependency_recovery.py'
       - '.github/scripts/dependency_recovery_selfcheck.py'
+      - '.github/scripts/validate_codeql_sarif.py'
+      - '.github/scripts/validate_codeql_sarif_selfcheck.py'
+      - '.github/scripts/validate_security_stack.py'
+      - '.github/workflows/security.yml'
       - '.github/workflows/dependency-governance.yml'
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
   workflow_run:
     workflows: [ci, extended, security, docs]
     types: [completed]
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       pr-number:
@@ -34,7 +40,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: dependency-governance-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || inputs['pr-number'] || github.ref_name || github.run_id }}-${{ github.event_name == 'pull_request' && 'self-test' || 'reconcile' }}
+  # Serialize every privileged reconcile while keeping untrusted PR self-tests isolated.
+  group: dependency-governance-${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'reconcile' }}
   cancel-in-progress: false
 
 env:
@@ -65,6 +72,9 @@ jobs:
           .github/scripts/dependency_governance_selfcheck.py
           .github/scripts/dependency_recovery.py
           .github/scripts/dependency_recovery_selfcheck.py
+          .github/scripts/validate_codeql_sarif.py
+          .github/scripts/validate_codeql_sarif_selfcheck.py
+          .github/scripts/validate_security_stack.py
       - name: Validate governance and recovery configuration
         run: |
           python .github/scripts/dependency_governance.py --validate-config
@@ -73,17 +83,21 @@ jobs:
         run: |
           python .github/scripts/dependency_governance_selfcheck.py
           python .github/scripts/dependency_recovery_selfcheck.py
+          python .github/scripts/validate_codeql_sarif_selfcheck.py
+          python .github/scripts/validate_security_stack.py
 
   govern:
     name: govern-dependabot
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 30
     permissions:
       actions: write
+      checks: read
       contents: write
       issues: write
       pull-requests: write
+      statuses: read
     steps:
       - name: Checkout trusted default-branch governance code only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,5 +124,6 @@ jobs:
       - name: Reconcile dependency governance
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ALLOW_MERGE: ${{ github.event_name == 'workflow_run' || github.event_name == 'schedule' || inputs['allow-merge'] }}
+          DEPENDABOT_OWNER_TOKEN: ${{ secrets.DEPENDABOT_OWNER_TOKEN }}
+          ALLOW_MERGE: ${{ github.event_name == 'workflow_run' || github.event_name == 'schedule' || github.event_name == 'push' || inputs['allow-merge'] }}
         run: python .github/scripts/dependency_governance.py

@@ -100,6 +100,12 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         errors.append("mergeMethod is invalid")
     if not isinstance(config.get("automergeEnabled"), bool):
         errors.append("automergeEnabled must be boolean")
+    if config.get("ownerApprovalRequired") is not True:
+        errors.append("ownerApprovalRequired must remain true")
+    if not nonempty(config.get("ownerApprovalLogin")):
+        errors.append("ownerApprovalLogin must be non-empty")
+    if not isinstance(config.get("ownerApprovalUserId"), int) or config.get("ownerApprovalUserId", 0) <= 0:
+        errors.append("ownerApprovalUserId must be a positive integer")
 
     for key, maximum in (
         ("maxChangedFiles", 100),
@@ -170,12 +176,18 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         errors.append("ecosystems must be configured")
         return unique(errors)
     maven = ecosystems.get("maven")
-    if not isinstance(maven, dict) or maven.get("mode") != "manual":
-        errors.append("maven ecosystem must be explicitly manual")
+    if not isinstance(maven, dict) or maven.get("mode") != "semantic":
+        errors.append("maven ecosystem must use semantic mode")
     elif not isinstance(maven.get("files"), list) or maven.get("files") != ["pom.xml"]:
         errors.append("maven files must be exactly ['pom.xml']")
-    elif not nonempty(maven.get("reason")):
-        errors.append("maven manual-review reason must be non-empty")
+    else:
+        maven_updates = maven.get("allowedUpdateTypes")
+        if (
+            not isinstance(maven_updates, list)
+            or not maven_updates
+            or any("major" in str(update) for update in maven_updates)
+        ):
+            errors.append("maven allowedUpdateTypes must exist and never include major updates")
 
     actions = ecosystems.get("github-actions")
     if not isinstance(actions, dict):
@@ -481,14 +493,10 @@ def validate_actions_semantic_change(
 ) -> dict[str, Any]:
     reasons: list[str] = []
     changes: list[dict[str, str]] = []
-    manual_paths = set(config["manualReviewPaths"])
     metadata_by_name = {item.get("name"): item for item in metadata if item.get("name")}
 
     for file in files:
         filename = str(file.get("filename") or "")
-        if filename in manual_paths:
-            reasons.append(f"{filename} is dependency-governance control plane and requires manual review")
-            continue
         before = base_contents.get(filename)
         after = head_contents.get(filename)
         if before is None or after is None:
@@ -568,12 +576,186 @@ def validate_actions_semantic_change(
     return {"eligible": not reasons, "reasons": unique(reasons), "changes": changes}
 
 
-def validate_maven_manual(config: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "eligible": False,
-        "reasons": [config["ecosystems"]["maven"]["reason"]],
-        "changes": [],
-    }
+def _maven_dependency_coordinate(lines: list[str], index: int) -> str | None:
+    start = None
+    for cursor in range(index, -1, -1):
+        if "</dependency>" in lines[cursor]:
+            return None
+        if "<dependency>" in lines[cursor]:
+            start = cursor
+            break
+    if start is None:
+        return None
+    end = None
+    for cursor in range(index, len(lines)):
+        if "<dependency>" in lines[cursor] and cursor != start:
+            return None
+        if "</dependency>" in lines[cursor]:
+            end = cursor
+            break
+    if end is None:
+        return None
+    block = "\n".join(lines[start : end + 1])
+    group = re.search(r"<groupId>\s*([^<]+?)\s*</groupId>", block)
+    artifact = re.search(r"<artifactId>\s*([^<]+?)\s*</artifactId>", block)
+    if not group or not artifact:
+        return None
+    return f"{group.group(1).strip()}:{artifact.group(1).strip()}"
+
+
+def _maven_property_consumers(text: str) -> dict[str, set[str]]:
+    lines = text.splitlines()
+    consumers: dict[str, set[str]] = {}
+    for index, line in enumerate(lines):
+        match = re.fullmatch(r"\s*<version>\$\{([A-Za-z0-9_.-]+)\}</version>\s*", line)
+        if not match:
+            continue
+        coordinate = _maven_dependency_coordinate(lines, index)
+        if coordinate:
+            consumers.setdefault(match.group(1), set()).add(coordinate)
+    return consumers
+
+
+def validate_maven_semantic_change(
+    base_text: str,
+    head_text: str,
+    metadata: list[dict[str, str]],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    changes: list[dict[str, str]] = []
+    before = base_text.splitlines()
+    after = head_text.splitlines()
+    if len(before) != len(after):
+        return {
+            "eligible": False,
+            "reasons": ["pom.xml changed line structure instead of only governed version text"],
+            "changes": [],
+        }
+
+    metadata_by_name = {item.get("name"): item for item in metadata if item.get("name")}
+    allowed_updates = set(config["ecosystems"]["maven"]["allowedUpdateTypes"])
+    property_consumers = _maven_property_consumers(base_text)
+    proven_names: set[str] = set()
+
+    property_line = re.compile(
+        r"^(?P<prefix>\s*)<(?P<tag>[A-Za-z0-9_.-]+)>(?P<version>\d+\.\d+\.\d+)</(?P=tag)>\s*$"
+    )
+    direct_version_line = re.compile(
+        r"^(?P<prefix>\s*)<version>(?P<version>\d+\.\d+\.\d+)</version>\s*$"
+    )
+
+    for index, (old_line, new_line) in enumerate(zip(before, after, strict=True)):
+        if old_line == new_line:
+            continue
+
+        old_property = property_line.fullmatch(old_line)
+        new_property = property_line.fullmatch(new_line)
+        if (
+            old_property
+            and new_property
+            and old_property.group("tag") == new_property.group("tag")
+            and old_property.group("tag") != "version"
+        ):
+            tag = old_property.group("tag")
+            consumers = property_consumers.get(tag, set())
+            if not consumers:
+                reasons.append(f"pom.xml:{index + 1} changes non-dependency property {tag}")
+                continue
+            unsigned = sorted(name for name in consumers if name not in metadata_by_name)
+            if unsigned:
+                reasons.append(
+                    f"pom.xml:{index + 1} property {tag} also governs unsigned dependencies: "
+                    + ", ".join(unsigned)
+                )
+                continue
+            for name in sorted(consumers):
+                signed = metadata_by_name[name]
+                update_type = signed.get("updateType")
+                if update_type not in allowed_updates:
+                    reasons.append(f"{name} uses non-autonomous update type {update_type or 'unknown'}")
+                    continue
+                old_version = old_property.group("version")
+                new_version = new_property.group("version")
+                if signed.get("version") and signed.get("version") != new_version:
+                    reasons.append(
+                        f"{name} signed Dependabot version {signed.get('version')} contradicts pom.xml {new_version}"
+                    )
+                    continue
+                risk = compare_versions(old_version, new_version)
+                if risk not in {"patch", "minor"}:
+                    reasons.append(f"{name} Maven transition is {risk}")
+                    continue
+                changes.append(
+                    {
+                        "ecosystem": "maven",
+                        "name": name,
+                        "from": old_version,
+                        "to": new_version,
+                        "risk": risk,
+                    }
+                )
+                proven_names.add(name)
+            continue
+
+        old_version_match = direct_version_line.fullmatch(old_line)
+        new_version_match = direct_version_line.fullmatch(new_line)
+        if old_version_match and new_version_match:
+            coordinate = _maven_dependency_coordinate(before, index)
+            if not coordinate:
+                reasons.append(
+                    f"pom.xml:{index + 1} changes a version outside a dependency declaration"
+                )
+                continue
+            signed = metadata_by_name.get(coordinate)
+            if not signed:
+                reasons.append(
+                    f"pom.xml:{index + 1} changes {coordinate} but signed metadata does not"
+                )
+                continue
+            update_type = signed.get("updateType")
+            if update_type not in allowed_updates:
+                reasons.append(
+                    f"{coordinate} uses non-autonomous update type {update_type or 'unknown'}"
+                )
+                continue
+            old_version = old_version_match.group("version")
+            new_version = new_version_match.group("version")
+            if signed.get("version") and signed.get("version") != new_version:
+                reasons.append(
+                    f"{coordinate} signed Dependabot version {signed.get('version')} contradicts pom.xml {new_version}"
+                )
+                continue
+            risk = compare_versions(old_version, new_version)
+            if risk not in {"patch", "minor"}:
+                reasons.append(f"{coordinate} Maven transition is {risk}")
+                continue
+            changes.append(
+                {
+                    "ecosystem": "maven",
+                    "name": coordinate,
+                    "from": old_version,
+                    "to": new_version,
+                    "risk": risk,
+                }
+            )
+            proven_names.add(coordinate)
+            continue
+
+        reasons.append(
+            f"pom.xml:{index + 1} changes content outside an existing dependency version value"
+        )
+
+    metadata_names = {name for name in metadata_by_name}
+    extras = sorted(metadata_names - proven_names)
+    if extras:
+        reasons.append(
+            "signed metadata contains dependency changes not proven in pom.xml diff: "
+            + ", ".join(extras)
+        )
+    if not changes:
+        reasons.append("no governed Maven dependency version update could be proven")
+    return {"eligible": not reasons, "reasons": unique(reasons), "changes": changes}
 
 
 def workflow_identity_matches(
@@ -773,8 +955,20 @@ def assess_pull(
     )
     ecosystem = classify_ecosystem(files, config)
 
-    if ecosystem == "maven":
-        semantic = validate_maven_manual(config)
+    if ecosystem == "maven" and provenance["eligible"] and metadata["eligible"]:
+        base_text = api.file_at("pom.xml", base_sha)
+        head_text = api.file_at("pom.xml", (pull.get("head") or {}).get("sha"))
+        semantic = validate_maven_semantic_change(
+            base_text, head_text, metadata["metadata"], config
+        )
+    elif ecosystem == "maven":
+        semantic = {
+            "eligible": False,
+            "reasons": [
+                "semantic Maven evaluation skipped because provenance or signed metadata is not eligible"
+            ],
+            "changes": [],
+        }
     elif ecosystem == "github-actions" and provenance["eligible"] and metadata["eligible"]:
         base_ref = base_sha
         head_ref = (pull.get("head") or {}).get("sha")
@@ -899,9 +1093,9 @@ def render_comment(
             "",
             "> Safety invariant: privileged governance executes only trusted default-branch code, "
             "requires an untouched GitHub-signed Dependabot commit directly on current main, proves "
-            "exact workflow identities and stable gates for the exact head, never regenerates Python "
-            "locks inside a dependency PR, and never autonomously merges major, downgrade, stale-base, "
-            "aged-out, control-plane, or semantically ambiguous changes.",
+            "exact workflow identities and stable gates for the exact head, never rewrites Dependabot "
+            "branches directly, and never autonomously merges major, downgrade, stale-base, aged-out, "
+            "control-plane, or semantically ambiguous changes.",
             "",
         ]
     )
@@ -926,8 +1120,132 @@ def upsert_comment(api: GitHubApi, pull_number: int, marker: str, body: str) -> 
         api.post(f"/issues/{pull_number}/comments", {"body": body})
 
 
+
+OWNER_REVIEW_MARKER = "<!-- dependency-owner-review:v1:"
+OWNER_APPROVAL_MARKER = "<!-- dependency-owner-approval:v1:"
+OWNER_REFRESH_MARKER = "<!-- dependency-owner-refresh:v1:"
+
+
+def verify_owner_identity(owner_api: GitHubApi | None, config: dict[str, Any]) -> None:
+    if owner_api is None:
+        raise GovernanceError(
+            "DEPENDABOT_OWNER_TOKEN is required for owner-authenticated Dependabot refresh, review, and approval"
+        )
+    identity = owner_api.get("https://api.github.com/user")
+    if not isinstance(identity, dict):
+        raise GovernanceError("owner token identity response is invalid")
+    if (
+        identity.get("login") != config["ownerApprovalLogin"]
+        or identity.get("id") != config["ownerApprovalUserId"]
+    ):
+        raise GovernanceError(
+            "DEPENDABOT_OWNER_TOKEN does not authenticate the configured repository owner identity"
+        )
+
+
+def has_exact_owner_approval(
+    owner_api: GitHubApi, number: int, head_sha: str, config: dict[str, Any]
+) -> bool:
+    reviews = owner_api.paginate(f"/pulls/{number}/reviews")
+    return any(
+        review.get("state") == "APPROVED"
+        and review.get("commit_id") == head_sha
+        and (review.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+        and (review.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+        for review in reviews
+    )
+
+
+def ensure_owner_review_and_approval(
+    owner_api: GitHubApi | None,
+    assessment: Assessment,
+    config: dict[str, Any],
+) -> None:
+    verify_owner_identity(owner_api, config)
+    assert owner_api is not None
+    number = int(assessment.pull["number"])
+    head_sha = str((assessment.pull.get("head") or {}).get("sha") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", head_sha):
+        raise GovernanceError("Dependabot head SHA is not canonical")
+    comment_marker = f"{OWNER_REVIEW_MARKER}{head_sha} -->"
+    comments = owner_api.paginate(f"/issues/{number}/comments")
+    exact_comments = [
+        comment
+        for comment in comments
+        if comment_marker in str(comment.get("body") or "")
+        and (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+    ]
+    if len(exact_comments) > 1:
+        raise GovernanceError(f"PR #{number} has duplicate exact-head owner review comments")
+    if not exact_comments:
+        owner_api.post(
+            f"/issues/{number}/comments",
+            {"body": (
+                f"{comment_marker}\n"
+                "## Owner-authenticated Dependabot review\n\n"
+                f"- Exact head: {head_sha}\n"
+                "- Canonical Dependabot provenance: **pass**\n"
+                "- Semantic dependency scope: **pass**\n"
+                "- Exact-head CI / Extended / Security / Docs qualification: **pass**\n"
+                "- Action: approve this exact head, revalidate it, then merge only if it remains unchanged and qualified.\n"
+            )},
+        )
+    if not has_exact_owner_approval(owner_api, number, head_sha, config):
+        owner_api.post(
+            f"/pulls/{number}/reviews",
+            {
+                "event": "APPROVE",
+                "commit_id": head_sha,
+                "body": (
+                    f"{OWNER_APPROVAL_MARKER}{head_sha} -->\n"
+                    "Owner-authenticated automated approval for this exact Dependabot head after "
+                    "canonical provenance, governed semantic scope, and all required exact-head "
+                    "qualification gates passed. Repository rules remain authoritative."
+                ),
+            },
+        )
+    if not has_exact_owner_approval(owner_api, number, head_sha, config):
+        raise GovernanceError(f"PR #{number} does not have the required exact-head owner approval")
+
+
+def request_dependabot_refresh(
+    owner_api: GitHubApi | None,
+    assessment: Assessment,
+    config: dict[str, Any],
+) -> bool:
+    stale_reason = "PR is not rebased directly on the current base branch head"
+    if assessment.provenance.get("reasons") != [stale_reason]:
+        return False
+    verify_owner_identity(owner_api, config)
+    assert owner_api is not None
+    number = int(assessment.pull["number"])
+    head_sha = str((assessment.pull.get("head") or {}).get("sha") or "")
+    marker = f"{OWNER_REFRESH_MARKER}{head_sha}:{assessment.base_sha}:rebase -->"
+    comments = owner_api.paginate(f"/issues/{number}/comments")
+    if any(
+        marker in str(comment.get("body") or "")
+        and (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+        for comment in comments
+    ):
+        return True
+    owner_api.post(
+        f"/issues/{number}/comments",
+        {"body": (
+            "@dependabot rebase\n\n"
+            f"{marker}\n"
+            "Requested by the configured push-capable repository owner because the exact "
+            "Dependabot source commit is no longer parented on current main. Qualification "
+            "restarts on the new exact head; no merge or security gate is bypassed."
+        )},
+    )
+    return True
+
+
 def maybe_merge(
     api: GitHubApi,
+    owner_api: GitHubApi | None,
     assessment: Assessment,
     config: dict[str, Any],
     allow_merge: bool,
@@ -950,6 +1268,23 @@ def maybe_merge(
         and refreshed.metadata["eligible"]
         and refreshed.semantic["eligible"]
         and bool((refreshed.qualification or {}).get("allSuccess"))
+    )
+    if not still_eligible:
+        return False, refreshed, []
+
+    ensure_owner_review_and_approval(owner_api, refreshed, config)
+    assert owner_api is not None
+    approved_head = str((refreshed.pull.get("head") or {}).get("sha") or "")
+    refreshed = assess_pull(api, assessment.pull["number"], config, include_qualification=True)
+    still_eligible = (
+        refreshed.pull.get("state") == "open"
+        and (refreshed.pull.get("head") or {}).get("sha") == approved_head
+        and refreshed.base_sha == assessment.base_sha
+        and refreshed.provenance["eligible"]
+        and refreshed.metadata["eligible"]
+        and refreshed.semantic["eligible"]
+        and bool((refreshed.qualification or {}).get("allSuccess"))
+        and has_exact_owner_approval(owner_api, refreshed.pull["number"], approved_head, config)
     )
     if not still_eligible:
         return False, refreshed, []
@@ -998,6 +1333,7 @@ def maybe_merge(
 
 def process_pull(
     api: GitHubApi,
+    owner_api: GitHubApi | None,
     number: int,
     config: dict[str, Any],
     allow_merge: bool,
@@ -1007,7 +1343,10 @@ def process_pull(
     if user.get("login") != config["botLogin"] or user.get("id") != config["botUserId"]:
         return {"skipped": True, "reason": "not canonical Dependabot", "merged": False}
 
-    merged, final_assessment, dispatches = maybe_merge(api, assessment, config, allow_merge)
+    request_dependabot_refresh(owner_api, assessment, config)
+    merged, final_assessment, dispatches = maybe_merge(
+        api, owner_api, assessment, config, allow_merge
+    )
     body = render_comment(final_assessment, config, merged=merged, dispatches=dispatches)
     upsert_comment(api, number, config["statusCommentMarker"], body)
 
@@ -1036,6 +1375,55 @@ def reconcile_independently(
         except Exception as exc:
             failures.append((number, str(exc)))
     return results, failures
+
+
+
+def reconcile_with_base_convergence(
+    list_pulls: Callable[[], list[dict[str, Any]]],
+    processor: Callable[[dict[str, Any]], Any],
+    *,
+    max_passes: int = 100,
+) -> tuple[list[tuple[int, Any, int]], list[tuple[int, str, int]], int]:
+    if not callable(list_pulls) or not callable(processor):
+        raise GovernanceError("convergence reconciler requires callable inputs")
+    if not isinstance(max_passes, int) or max_passes < 1 or max_passes > 1000:
+        raise GovernanceError("max_passes must be an integer from 1 to 1000")
+    results: list[tuple[int, Any, int]] = []
+    failures: list[tuple[int, str, int]] = []
+    merged_numbers: set[int] = set()
+
+    for pass_number in range(1, max_passes + 1):
+        pulls = list_pulls()
+        if not isinstance(pulls, list):
+            raise GovernanceError("list_pulls must return a list")
+        candidates = [
+            pull
+            for pull in pulls
+            if isinstance(pull.get("number"), int)
+            and pull["number"] not in merged_numbers
+        ]
+        if not candidates:
+            return results, failures, pass_number
+
+        base_advanced = False
+        for pull in candidates:
+            number = pull["number"]
+            try:
+                result = processor(pull)
+                results.append((number, result, pass_number))
+                if isinstance(result, dict) and result.get("merged") is True:
+                    merged_numbers.add(number)
+                    base_advanced = True
+                    break
+            except Exception as exc:
+                failures.append((number, str(exc), pass_number))
+
+        if not base_advanced:
+            return results, failures, pass_number
+
+    raise GovernanceError(
+        f"dependency governance convergence exceeded {max_passes} pass(es)"
+    )
 
 
 def event_pull_number(event: dict[str, Any], event_name: str) -> int | None:
@@ -1092,24 +1480,44 @@ def main(argv: list[str] | None = None) -> int:
         raise GovernanceError("GITHUB_EVENT_NAME is required")
     event = _read_event()
     api = GitHubApi(token, repository, config["maxPaginationPages"])
+    owner_token = os.environ.get("DEPENDABOT_OWNER_TOKEN", "").strip()
+    owner_api = (
+        GitHubApi(owner_token, repository, config["maxPaginationPages"])
+        if owner_token
+        else None
+    )
     allow_merge = os.environ.get("ALLOW_MERGE") == "true"
 
-    if event_name == "schedule":
-        pulls = api.paginate("/pulls?state=open")
-        dependabot_pulls = [
-            pull
-            for pull in pulls
-            if (pull.get("user") or {}).get("login") == config["botLogin"]
-            and (pull.get("user") or {}).get("id") == config["botUserId"]
-        ]
-        results, failures = reconcile_independently(
-            dependabot_pulls,
-            lambda pull: process_pull(api, pull["number"], config, allow_merge),
+    if event_name in {"schedule", "push"}:
+        def list_dependabot_pulls() -> list[dict[str, Any]]:
+            pulls = api.paginate("/pulls?state=open")
+            return [
+                pull
+                for pull in pulls
+                if (pull.get("user") or {}).get("login") == config["botLogin"]
+                and (pull.get("user") or {}).get("id") == config["botUserId"]
+            ]
+
+        results, failures, passes = reconcile_with_base_convergence(
+            list_dependabot_pulls,
+            lambda pull: process_pull(
+                api, owner_api, pull["number"], config, allow_merge
+            ),
+            max_passes=100,
         )
-        print(json.dumps({"reconciled": len(results), "failed": failures}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "reconciled": len(results),
+                    "passes": passes,
+                    "failed": failures,
+                },
+                indent=2,
+            )
+        )
         if failures:
             raise GovernanceError(
-                f"scheduled dependency governance failed for {len(failures)} PR(s)"
+                f"dependency governance failed for {len(failures)} PR attempt(s)"
             )
         return 0
 
@@ -1120,7 +1528,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No pull request resolved for {event_name}; nothing to do.")
         return 0
 
-    result = process_pull(api, number, config, allow_merge)
+    result = process_pull(api, owner_api, number, config, allow_merge)
     print(
         json.dumps(
             {
