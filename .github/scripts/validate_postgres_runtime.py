@@ -103,7 +103,7 @@ def validate(errors: list[str]) -> None:
         "scan-type: image",
         "image-ref: ${{ env.POSTGRES_TEST_IMAGE }}",
         "postgres-image-security-evidence-${{ github.run_id }}",
-        "needs: [codeql, maven-dependencies, postgres-image, trivy-repository, dependency-review]",
+        "needs: [codeql-java, codeql-automation, maven-dependencies, postgres-image, trivy-repository, dependency-review]",
         '[[ "$POSTGRES_IMAGE" == "success" ]]',
     )
     for token in security_tokens:
