@@ -324,7 +324,7 @@ class RecoverySelfCheck(unittest.TestCase):
         self.assertFalse(capped["rerunnable"])
         self.assertIn("recovery cap", capped["reason"])
 
-    def test_manual_maven_recovery_never_changes_manual_merge_policy(self) -> None:
+    def test_semantic_maven_recovery_remains_retry_only_under_governed_merge_policy(self) -> None:
         result = recovery_scope_assessment(
             pull={"changed_files": 1},
             files=[{"filename": "pom.xml"}],
@@ -334,8 +334,13 @@ class RecoverySelfCheck(unittest.TestCase):
         )
         self.assertTrue(result["eligible"])
         self.assertEqual(result["ecosystem"], "maven")
-        self.assertEqual(result["mergePolicy"], "manual")
-        self.assertEqual(GOVERNANCE["ecosystems"]["maven"]["mode"], "manual")
+        self.assertEqual(result["mergePolicy"], "governed-autonomous")
+        self.assertEqual(GOVERNANCE["ecosystems"]["maven"]["mode"], "semantic")
+        source = (ROOT / ".github" / "scripts" / "dependency_recovery.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("/pulls/{safe_number}/merge", source)
+        self.assertIn("controller never mutates Dependabot branches", source)
 
     def test_control_plane_paths_are_recovery_ineligible(self) -> None:
         for path in (
