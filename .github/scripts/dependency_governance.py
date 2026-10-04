@@ -651,7 +651,12 @@ def validate_maven_semantic_change(
 
         old_property = property_line.fullmatch(old_line)
         new_property = property_line.fullmatch(new_line)
-        if (\n            old_property\n            and new_property\n            and old_property.group("tag") == new_property.group("tag")\n            and old_property.group("tag") != "version"\n        ):
+        if (
+            old_property
+            and new_property
+            and old_property.group("tag") == new_property.group("tag")
+            and old_property.group("tag") != "version"
+        ):
             tag = old_property.group("tag")
             consumers = property_consumers.get(tag, set())
             if not consumers:
