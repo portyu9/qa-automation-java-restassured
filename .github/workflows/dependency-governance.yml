@@ -114,6 +114,7 @@ jobs:
           python .github/scripts/dependency_governance.py --validate-config
           python .github/scripts/dependency_recovery.py --validate-config
       - name: Attempt bounded dependency recovery
+        if: github.event_name != 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RECOVERY_EVENT_NAME: ${{ github.event_name }}
