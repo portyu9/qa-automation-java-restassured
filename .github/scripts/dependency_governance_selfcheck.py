@@ -204,6 +204,16 @@ class DependencyGovernanceTests(unittest.TestCase):
             classify_ecosystem([{"filename": "pom.xml"}], CONFIG), "maven"
         )
         self.assertEqual(
+            classify_ecosystem(
+                [
+                    {"filename": "pom.xml"},
+                    {"filename": ".mvn/wrapper/maven-wrapper.properties"},
+                ],
+                CONFIG,
+            ),
+            "maven",
+        )
+        self.assertEqual(
             classify_ecosystem([{"filename": ".github/workflows/ci.yml"}], CONFIG),
             "github-actions",
         )
@@ -289,6 +299,105 @@ class DependencyGovernanceTests(unittest.TestCase):
         }], CONFIG)["eligible"])
         structure = base.replace("</properties>", "    <new.policy>true</new.policy>\n  </properties>")
         self.assertFalse(validate_maven_semantic_change(base, structure, signed, CONFIG)["eligible"])
+
+    def test_maven_wrapper_and_dependency_group_is_semantically_eligible(self) -> None:
+        pom_before = """<project>
+  <dependencies>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.19</version>
+    </dependency>
+  </dependencies>
+</project>"""
+        pom_after = pom_before.replace("2.0.19", "2.0.20")
+        wrapper_before = (
+            "wrapperVersion=3.3.4\n"
+            "distributionType=only-script\n"
+            "distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/"
+            "3.9.16/apache-maven-3.9.16-bin.zip\n"
+            f"distributionSha256Sum={'a' * 64}\n"
+        )
+        wrapper_after = wrapper_before.replace(
+            "3.9.16/apache-maven-3.9.16-bin.zip",
+            "3.10.0/apache-maven-3.10.0-bin.zip",
+        ).replace("a" * 64, "b" * 64)
+        metadata = [
+            {
+                "name": "org.slf4j:slf4j-simple",
+                "version": "2.0.20",
+                "updateType": "version-update:semver-patch",
+            },
+            {
+                "name": "org.apache.maven:apache-maven",
+                "version": "3.10.0",
+                "updateType": "version-update:semver-minor",
+            },
+        ]
+        result = validate_maven_semantic_change(
+            pom_before,
+            pom_after,
+            metadata,
+            CONFIG,
+            wrapper_before,
+            wrapper_after,
+        )
+        self.assertTrue(result["eligible"], result["reasons"])
+        self.assertEqual(
+            {change["name"] for change in result["changes"]},
+            {"org.slf4j:slf4j-simple", "org.apache.maven:apache-maven"},
+        )
+
+    def test_maven_wrapper_rejects_unpinned_or_structural_mutation(self) -> None:
+        pom = "<project></project>"
+        before = (
+            "wrapperVersion=3.3.4\n"
+            "distributionType=only-script\n"
+            "distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/"
+            "3.9.16/apache-maven-3.9.16-bin.zip\n"
+            f"distributionSha256Sum={'a' * 64}\n"
+        )
+        metadata = [{
+            "name": "org.apache.maven:apache-maven",
+            "version": "3.10.0",
+            "updateType": "version-update:semver-minor",
+        }]
+        good = before.replace(
+            "3.9.16/apache-maven-3.9.16-bin.zip",
+            "3.10.0/apache-maven-3.10.0-bin.zip",
+        ).replace("a" * 64, "b" * 64)
+        malicious = good.replace("repo.maven.apache.org", "example.invalid")
+        self.assertFalse(
+            validate_maven_semantic_change(
+                pom, pom, metadata, CONFIG, before, malicious
+            )["eligible"]
+        )
+        unpinned = good.replace("b" * 64, "not-a-sha256")
+        self.assertFalse(
+            validate_maven_semantic_change(
+                pom, pom, metadata, CONFIG, before, unpinned
+            )["eligible"]
+        )
+        structural = good.replace("wrapperVersion=3.3.4", "wrapperVersion=3.3.5")
+        self.assertFalse(
+            validate_maven_semantic_change(
+                pom, pom, metadata, CONFIG, before, structural
+            )["eligible"]
+        )
+        major_metadata = [{
+            **metadata[0],
+            "version": "4.0.0",
+            "updateType": "version-update:semver-major",
+        }]
+        major = before.replace(
+            "3.9.16/apache-maven-3.9.16-bin.zip",
+            "4.0.0/apache-maven-4.0.0-bin.zip",
+        ).replace("a" * 64, "b" * 64)
+        self.assertFalse(
+            validate_maven_semantic_change(
+                pom, pom, major_metadata, CONFIG, before, major
+            )["eligible"]
+        )
 
     def test_action_line_requires_immutable_sha_and_version_annotation(self) -> None:
         good = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
