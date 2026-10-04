@@ -443,6 +443,42 @@ class DependencyGovernanceTests(unittest.TestCase):
             "\n".join(result["reasons"]),
         )
 
+    def test_actions_accept_dependabot_patch_footer_lag_within_same_release_line(self) -> None:
+        file = ".github/workflows/security.yml"
+        before = (
+            "steps:\n"
+            "  - name: Initialize CodeQL\n"
+            "    uses: github/codeql-action/init@" + "a" * 40 + " # v4.38.0\n"
+        )
+        after = (
+            "steps:\n"
+            "  - name: Initialize CodeQL\n"
+            "    uses: github/codeql-action/init@" + "b" * 40 + " # v4.38.2\n"
+        )
+        lagging = [{
+            "name": "github/codeql-action/init",
+            "version": "4.38.1",
+            "updateType": "version-update:semver-patch",
+        }]
+        result = validate_actions_semantic_change(
+            [{"filename": file}], {file: before}, {file: after}, lagging, CONFIG
+        )
+        self.assertTrue(result["eligible"], result["reasons"])
+
+        wrong_line = [{**lagging[0], "version": "4.39.0"}]
+        result = validate_actions_semantic_change(
+            [{"filename": file}], {file: before}, {file: after}, wrong_line, CONFIG
+        )
+        self.assertFalse(result["eligible"])
+        self.assertIn("leaves workflow annotation line", "\n".join(result["reasons"]))
+
+        wrong_class = [{**lagging[0], "updateType": "version-update:semver-minor"}]
+        result = validate_actions_semantic_change(
+            [{"filename": file}], {file: before}, {file: after}, wrong_class, CONFIG
+        )
+        self.assertFalse(result["eligible"])
+        self.assertIn("update class minor contradicts", "\n".join(result["reasons"]))
+
     def test_actions_patch_update_is_eligible(self) -> None:
         file = ".github/workflows/ci.yml"
         before = "steps:\n  - uses: actions/checkout@" + "a" * 40 + " # v7.0.1\n"
