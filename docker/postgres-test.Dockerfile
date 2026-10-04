@@ -26,8 +26,8 @@ COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 
 RUN set -eux; \
     apk add --no-cache \
-        'libcrypto3=3.5.8-r0' \
-        'libssl3=3.5.8-r0' \
+        'libcrypto3=3.5.9-r0' \
+        'libssl3=3.5.9-r0' \
         'libuuid=2.42.3-r1'; \
     apk list --installed libcrypto3 2>/dev/null | grep -q '^libcrypto3-3\.5\.8-r0 '; \
     apk list --installed libssl3 2>/dev/null | grep -q '^libssl3-3\.5\.8-r0 '; \
