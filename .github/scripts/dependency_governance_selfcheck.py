@@ -561,7 +561,7 @@ class DependencyGovernanceTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", workflow)
         self.assertNotRegex(workflow, r"ref:\s*\$\{\{\s*github\.event\.pull_request\.head")
         self.assertNotRegex(workflow, r"ref:\s*\$\{\{\s*github\.event\.workflow_run\.head_sha")
-        self.assertIn("'self-test' || 'reconcile'", workflow)
+        self.assertIn("github.event.pull_request.head.ref || 'reconcile'", workflow)
 
 
 if __name__ == "__main__":
