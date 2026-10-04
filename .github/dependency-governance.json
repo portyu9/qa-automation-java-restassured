@@ -63,7 +63,8 @@
   "ecosystems": {
     "maven": {
       "files": [
-        "pom.xml"
+        "pom.xml",
+        ".mvn/wrapper/maven-wrapper.properties"
       ],
       "mode": "semantic",
       "allowedUpdateTypes": [
