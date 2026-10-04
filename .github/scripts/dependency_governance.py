@@ -21,7 +21,7 @@ DEFAULT_CONFIG = ROOT / ".github" / "dependency-governance.json"
 PAGE_SIZE = 100
 SAFE_TERMINAL_CONCLUSIONS = {"success", "neutral", "skipped"}
 ACTION_LINE = re.compile(
-    r"^(?P<prefix>\s*(?:-\s+)?uses:\s+)(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)"
+    r"^(?P<prefix>\s*(?:-\s+)?uses:\s+)(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)"
     r"@(?P<ref>[0-9a-fA-F]{40})(?P<suffix>\s+#\s+v(?P<version>\d+(?:\.\d+){0,2})\s*)$"
 )
 POSITIVE_INT = re.compile(r"^[1-9]\d*$")
