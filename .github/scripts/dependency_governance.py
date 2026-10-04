@@ -547,24 +547,38 @@ def validate_actions_semantic_change(
                 reasons.append(f"{action} uses non-autonomous update type {update_type or 'unknown'}")
 
             old_version, new_version = old_match.group("version"), new_match.group("version")
+            risk = compare_versions(old_version, new_version)
+            signed_risk = (
+                "patch" if str(update_type or "").endswith("semver-patch")
+                else "minor" if str(update_type or "").endswith("semver-minor")
+                else None
+            )
+            if risk in {"major", "major-risk", "downgrade", "unknown"}:
+                reasons.append(f"{action} action annotation transition is {risk}")
+            elif risk in {"patch", "minor"} and signed_risk != risk:
+                reasons.append(
+                    f"{action} signed Dependabot update class {signed_risk or 'unknown'} contradicts "
+                    f"workflow annotation transition {risk}"
+                )
+            elif risk == "same" and update_type not in config["allowedActionUpdateTypes"]:
+                reasons.append(f"{action} coarse action annotation cannot prove a non-major update")
+
             signed_version = signed.get("version")
             if signed_version:
                 parsed_signed = parse_version(signed_version)
                 parsed_annotation = parse_version(new_version)
                 if parsed_signed is None or parsed_annotation is None:
                     reasons.append(f"{action} signed or annotated version is not a stable numeric release")
-                else:
-                    annotation_parts = len(new_version.split("."))
-                    if parsed_signed[:annotation_parts] != parsed_annotation[:annotation_parts]:
-                        reasons.append(
-                            f"{action} signed Dependabot version {signed_version} contradicts "
-                            f"workflow annotation v{new_version}"
-                        )
-            risk = compare_versions(old_version, new_version)
-            if risk in {"major", "major-risk", "downgrade", "unknown"}:
-                reasons.append(f"{action} action annotation transition is {risk}")
-            elif risk == "same" and update_type not in config["allowedActionUpdateTypes"]:
-                reasons.append(f"{action} coarse action annotation cannot prove a non-major update")
+                elif signed_risk == "patch" and parsed_signed[:2] != parsed_annotation[:2]:
+                    reasons.append(
+                        f"{action} signed Dependabot patch version {signed_version} leaves "
+                        f"workflow annotation line v{new_version}"
+                    )
+                elif signed_risk == "minor" and parsed_signed[0] != parsed_annotation[0]:
+                    reasons.append(
+                        f"{action} signed Dependabot minor version {signed_version} leaves "
+                        f"workflow annotation major v{new_version}"
+                    )
             changes.append(
                 {
                     "ecosystem": "github-actions",
