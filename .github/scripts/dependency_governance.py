@@ -25,6 +25,13 @@ ACTION_LINE = re.compile(
     r"@(?P<ref>[0-9a-fA-F]{40})(?P<suffix>\s+#\s+v(?P<version>\d+(?:\.\d+){0,2})\s*)$"
 )
 POSITIVE_INT = re.compile(r"^[1-9]\d*$")
+MAVEN_WRAPPER_FILE = ".mvn/wrapper/maven-wrapper.properties"
+MAVEN_WRAPPER_DEPENDENCY = "org.apache.maven:apache-maven"
+MAVEN_DISTRIBUTION = re.compile(
+    r"^https://repo\.maven\.apache\.org/maven2/org/apache/maven/apache-maven/"
+    r"(?P<version>\d+\.\d+\.\d+)/apache-maven-(?P=version)-bin\.zip$"
+)
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class GovernanceError(RuntimeError):
