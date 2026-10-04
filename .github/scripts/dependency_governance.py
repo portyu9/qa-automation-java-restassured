@@ -1586,6 +1586,12 @@ def event_pull_number(event: dict[str, Any], event_name: str) -> int | None:
     return None
 
 
+def should_bulk_reconcile(event_name: str, pull_number: int | None) -> bool:
+    return event_name in {"schedule", "push"} or (
+        event_name == "workflow_run" and pull_number is None
+    )
+
+
 def resolve_workflow_run_pull(api: GitHubApi, event: dict[str, Any]) -> int | None:
     direct = event_pull_number(event, "workflow_run")
     if direct:
@@ -1632,7 +1638,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     allow_merge = os.environ.get("ALLOW_MERGE") == "true"
 
-    if event_name in {"schedule", "push"}:
+    number = event_pull_number(event, event_name)
+    if number is None and event_name == "workflow_run":
+        number = resolve_workflow_run_pull(api, event)
+
+    if should_bulk_reconcile(event_name, number):
         def list_dependabot_pulls() -> list[dict[str, Any]]:
             pulls = api.paginate("/pulls?state=open")
             return [
@@ -1665,9 +1675,6 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
-    number = event_pull_number(event, event_name)
-    if number is None and event_name == "workflow_run":
-        number = resolve_workflow_run_pull(api, event)
     if number is None:
         print(f"No pull request resolved for {event_name}; nothing to do.")
         return 0
