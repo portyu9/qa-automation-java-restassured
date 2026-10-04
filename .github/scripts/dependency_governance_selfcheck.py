@@ -401,9 +401,46 @@ class DependencyGovernanceTests(unittest.TestCase):
 
     def test_action_line_requires_immutable_sha_and_version_annotation(self) -> None:
         good = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
+        nested = "        uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
         self.assertIsNotNone(ACTION_LINE.fullmatch(good))
+        self.assertIsNotNone(ACTION_LINE.fullmatch(nested))
         self.assertIsNone(ACTION_LINE.fullmatch("      - uses: actions/checkout@v7"))
         self.assertIsNone(ACTION_LINE.fullmatch("      - uses: ./local-action"))
+
+    def test_actions_named_step_patch_update_is_eligible_without_yaml_structure_change(self) -> None:
+        file = ".github/workflows/security.yml"
+        before = (
+            "steps:\n"
+            "  - name: Initialize CodeQL\n"
+            "    uses: github/codeql-action/init@" + "a" * 40 + " # v4.38.0\n"
+        )
+        after = (
+            "steps:\n"
+            "  - name: Initialize CodeQL\n"
+            "    uses: github/codeql-action/init@" + "b" * 40 + " # v4.38.2\n"
+        )
+        metadata = [{
+            "name": "github/codeql-action/init",
+            "version": "4.38.2",
+            "updateType": "version-update:semver-patch",
+        }]
+        result = validate_actions_semantic_change(
+            [{"filename": file}], {file: before}, {file: after}, metadata, CONFIG
+        )
+        self.assertTrue(result["eligible"], result["reasons"])
+
+        changed_structure = after.replace(
+            "    uses: github/codeql-action/init@",
+            "    - uses: github/codeql-action/init@",
+        )
+        result = validate_actions_semantic_change(
+            [{"filename": file}], {file: before}, {file: changed_structure}, metadata, CONFIG
+        )
+        self.assertFalse(result["eligible"])
+        self.assertIn(
+            "changes YAML structure around an action reference",
+            "\n".join(result["reasons"]),
+        )
 
     def test_actions_patch_update_is_eligible(self) -> None:
         file = ".github/workflows/ci.yml"
