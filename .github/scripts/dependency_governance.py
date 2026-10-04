@@ -25,6 +25,13 @@ ACTION_LINE = re.compile(
     r"@(?P<ref>[0-9a-fA-F]{40})(?P<suffix>\s+#\s+v(?P<version>\d+(?:\.\d+){0,2})\s*)$"
 )
 POSITIVE_INT = re.compile(r"^[1-9]\d*$")
+MAVEN_WRAPPER_FILE = ".mvn/wrapper/maven-wrapper.properties"
+MAVEN_WRAPPER_DEPENDENCY = "org.apache.maven:apache-maven"
+MAVEN_DISTRIBUTION = re.compile(
+    r"^https://repo\.maven\.apache\.org/maven2/org/apache/maven/apache-maven/"
+    r"(?P<version>\d+\.\d+\.\d+)/apache-maven-(?P=version)-bin\.zip$"
+)
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class GovernanceError(RuntimeError):
@@ -178,8 +185,13 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     maven = ecosystems.get("maven")
     if not isinstance(maven, dict) or maven.get("mode") != "semantic":
         errors.append("maven ecosystem must use semantic mode")
-    elif not isinstance(maven.get("files"), list) or maven.get("files") != ["pom.xml"]:
-        errors.append("maven files must be exactly ['pom.xml']")
+    elif not isinstance(maven.get("files"), list) or maven.get("files") != [
+        "pom.xml",
+        MAVEN_WRAPPER_FILE,
+    ]:
+        errors.append(
+            "maven files must be exactly ['pom.xml', '.mvn/wrapper/maven-wrapper.properties']"
+        )
     else:
         maven_updates = maven.get("allowedUpdateTypes")
         if (
@@ -616,11 +628,121 @@ def _maven_property_consumers(text: str) -> dict[str, set[str]]:
     return consumers
 
 
+def validate_maven_wrapper_semantic_change(
+    base_text: str,
+    head_text: str,
+    metadata: list[dict[str, str]],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    changes: list[dict[str, str]] = []
+    proven_names: set[str] = set()
+
+    def parse_properties(text: str, label: str) -> dict[str, str] | None:
+        values: dict[str, str] = {}
+        lines = text.splitlines()
+        for index, line in enumerate(lines, start=1):
+            if not line or "=" not in line:
+                reasons.append(f"{MAVEN_WRAPPER_FILE}:{index} has unsupported {label} structure")
+                return None
+            key, value = line.split("=", 1)
+            if key in values:
+                reasons.append(f"{MAVEN_WRAPPER_FILE} contains duplicate property {key}")
+                return None
+            values[key] = value
+        expected = {
+            "wrapperVersion",
+            "distributionType",
+            "distributionUrl",
+            "distributionSha256Sum",
+        }
+        if set(values) != expected:
+            reasons.append(
+                f"{MAVEN_WRAPPER_FILE} must contain exactly the governed wrapper properties"
+            )
+            return None
+        return values
+
+    before = parse_properties(base_text, "base")
+    after = parse_properties(head_text, "head")
+    if before is None or after is None:
+        return {
+            "eligible": False,
+            "reasons": unique(reasons),
+            "changes": changes,
+            "provenNames": sorted(proven_names),
+        }
+
+    if before["wrapperVersion"] != after["wrapperVersion"]:
+        reasons.append("Maven Wrapper implementation version changed")
+    if before["distributionType"] != after["distributionType"] or after["distributionType"] != "only-script":
+        reasons.append("Maven Wrapper distributionType must remain only-script")
+
+    old_url = MAVEN_DISTRIBUTION.fullmatch(before["distributionUrl"])
+    new_url = MAVEN_DISTRIBUTION.fullmatch(after["distributionUrl"])
+    if not old_url or not new_url:
+        reasons.append("Maven distributionUrl must remain the canonical Maven Central binary URL")
+        old_version = new_version = None
+    else:
+        old_version = old_url.group("version")
+        new_version = new_url.group("version")
+
+    old_sha = before["distributionSha256Sum"]
+    new_sha = after["distributionSha256Sum"]
+    if not SHA256.fullmatch(old_sha) or not SHA256.fullmatch(new_sha):
+        reasons.append("Maven Wrapper distribution checksum must remain a lowercase 64-hex SHA-256")
+    if old_version == new_version:
+        reasons.append("Maven Wrapper distribution version did not change")
+    elif old_sha == new_sha:
+        reasons.append("Maven Wrapper distribution checksum did not change with the version")
+
+    metadata_by_name = {item.get("name"): item for item in metadata if item.get("name")}
+    signed = metadata_by_name.get(MAVEN_WRAPPER_DEPENDENCY)
+    if not signed:
+        reasons.append("Maven Wrapper changed without signed org.apache.maven:apache-maven metadata")
+    elif new_version is not None:
+        allowed_updates = set(config["ecosystems"]["maven"]["allowedUpdateTypes"])
+        update_type = signed.get("updateType")
+        if update_type not in allowed_updates:
+            reasons.append(
+                f"{MAVEN_WRAPPER_DEPENDENCY} uses non-autonomous update type {update_type or 'unknown'}"
+            )
+        elif signed.get("version") and signed.get("version") != new_version:
+            reasons.append(
+                f"{MAVEN_WRAPPER_DEPENDENCY} signed Dependabot version "
+                f"{signed.get('version')} contradicts wrapper {new_version}"
+            )
+        elif old_version is not None:
+            risk = compare_versions(old_version, new_version)
+            if risk not in {"patch", "minor"}:
+                reasons.append(f"{MAVEN_WRAPPER_DEPENDENCY} Maven Wrapper transition is {risk}")
+            else:
+                changes.append(
+                    {
+                        "ecosystem": "maven",
+                        "name": MAVEN_WRAPPER_DEPENDENCY,
+                        "from": old_version,
+                        "to": new_version,
+                        "risk": risk,
+                    }
+                )
+                proven_names.add(MAVEN_WRAPPER_DEPENDENCY)
+
+    return {
+        "eligible": not reasons,
+        "reasons": unique(reasons),
+        "changes": changes,
+        "provenNames": sorted(proven_names),
+    }
+
+
 def validate_maven_semantic_change(
     base_text: str,
     head_text: str,
     metadata: list[dict[str, str]],
     config: dict[str, Any],
+    base_wrapper_text: str | None = None,
+    head_wrapper_text: str | None = None,
 ) -> dict[str, Any]:
     reasons: list[str] = []
     changes: list[dict[str, str]] = []
@@ -745,6 +867,16 @@ def validate_maven_semantic_change(
         reasons.append(
             f"pom.xml:{index + 1} changes content outside an existing dependency version value"
         )
+
+    if (base_wrapper_text is None) != (head_wrapper_text is None):
+        reasons.append("Maven Wrapper base/head evidence is incomplete")
+    elif base_wrapper_text is not None and head_wrapper_text is not None:
+        wrapper = validate_maven_wrapper_semantic_change(
+            base_wrapper_text, head_wrapper_text, metadata, config
+        )
+        reasons.extend(wrapper["reasons"])
+        changes.extend(wrapper["changes"])
+        proven_names.update(wrapper["provenNames"])
 
     metadata_names = {name for name in metadata_by_name}
     extras = sorted(metadata_names - proven_names)
@@ -956,10 +1088,22 @@ def assess_pull(
     ecosystem = classify_ecosystem(files, config)
 
     if ecosystem == "maven" and provenance["eligible"] and metadata["eligible"]:
+        head_ref = (pull.get("head") or {}).get("sha")
         base_text = api.file_at("pom.xml", base_sha)
-        head_text = api.file_at("pom.xml", (pull.get("head") or {}).get("sha"))
+        head_text = api.file_at("pom.xml", head_ref)
+        changed_names = {str(file.get("filename") or "") for file in files}
+        base_wrapper_text = None
+        head_wrapper_text = None
+        if MAVEN_WRAPPER_FILE in changed_names:
+            base_wrapper_text = api.file_at(MAVEN_WRAPPER_FILE, base_sha)
+            head_wrapper_text = api.file_at(MAVEN_WRAPPER_FILE, head_ref)
         semantic = validate_maven_semantic_change(
-            base_text, head_text, metadata["metadata"], config
+            base_text,
+            head_text,
+            metadata["metadata"],
+            config,
+            base_wrapper_text,
+            head_wrapper_text,
         )
     elif ecosystem == "maven":
         semantic = {
