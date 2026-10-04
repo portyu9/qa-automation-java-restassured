@@ -18,6 +18,7 @@ from dependency_governance import (
     reconcile_with_base_convergence,
     render_comment,
     select_qualification_run,
+    should_bulk_reconcile,
     validate_actions_semantic_change,
     validate_config,
     validate_maven_semantic_change,
@@ -560,6 +561,14 @@ class DependencyGovernanceTests(unittest.TestCase):
         for bad in ("0", "-1", "1.2", "nope"):
             with self.assertRaises(GovernanceError):
                 event_pull_number({"inputs": {"pr-number": bad}}, "workflow_dispatch")
+
+    def test_unassociated_workflow_run_falls_back_to_bulk_reconcile(self) -> None:
+        self.assertTrue(should_bulk_reconcile("push", None))
+        self.assertTrue(should_bulk_reconcile("schedule", None))
+        self.assertTrue(should_bulk_reconcile("workflow_run", None))
+        self.assertFalse(should_bulk_reconcile("workflow_run", 64))
+        self.assertFalse(should_bulk_reconcile("pull_request_target", 64))
+        self.assertFalse(should_bulk_reconcile("workflow_dispatch", 64))
 
     def test_schedule_reconciliation_isolates_failures(self) -> None:
         pulls = [{"number": 1}, {"number": 2}, {"number": 3}]
