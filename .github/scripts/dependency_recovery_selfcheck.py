@@ -414,6 +414,14 @@ class RecoverySelfCheck(unittest.TestCase):
         self.assertIn("python .github/scripts/dependency_recovery_selfcheck.py", workflow)
         self.assertIn("actions: write", workflow)
         self.assertIn("ALLOW_RECOVERY_RERUN:", workflow)
+        recovery_step = """      - name: Attempt bounded dependency recovery
+        if: github.event_name != 'push'
+"""
+        self.assertIn(recovery_step, workflow)
+        self.assertIn(
+            "github.event_name == 'workflow_run' || github.event_name == 'schedule' || github.event_name == 'push'",
+            workflow,
+        )
         self.assertLess(
             workflow.index("Attempt bounded dependency recovery"),
             workflow.index("Reconcile dependency governance"),
