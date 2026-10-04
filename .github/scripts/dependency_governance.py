@@ -651,7 +651,7 @@ def validate_maven_semantic_change(
 
         old_property = property_line.fullmatch(old_line)
         new_property = property_line.fullmatch(new_line)
-        if old_property and new_property and old_property.group("tag") == new_property.group("tag"):
+        if (\n            old_property\n            and new_property\n            and old_property.group("tag") == new_property.group("tag")\n            and old_property.group("tag") != "version"\n        ):
             tag = old_property.group("tag")
             consumers = property_consumers.get(tag, set())
             if not consumers:
@@ -1088,9 +1088,9 @@ def render_comment(
             "",
             "> Safety invariant: privileged governance executes only trusted default-branch code, "
             "requires an untouched GitHub-signed Dependabot commit directly on current main, proves "
-            "exact workflow identities and stable gates for the exact head, never regenerates Python "
-            "locks inside a dependency PR, and never autonomously merges major, downgrade, stale-base, "
-            "aged-out, control-plane, or semantically ambiguous changes.",
+            "exact workflow identities and stable gates for the exact head, never rewrites Dependabot "
+            "branches directly, and never autonomously merges major, downgrade, stale-base, aged-out, "
+            "control-plane, or semantically ambiguous changes.",
             "",
         ]
     )
