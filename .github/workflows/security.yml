@@ -20,8 +20,8 @@ env:
   POSTGRES_TEST_DOCKERFILE: docker/postgres-test.Dockerfile
 
 jobs:
-  codeql:
-    name: CodeQL
+  codeql-java:
+    name: CodeQL Java
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       actions: read
@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Java 25 LTS
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -51,7 +53,64 @@ jobs:
       - name: Compile test framework for CodeQL
         run: ./mvnw -B -ntp -DskipTests test-compile
       - name: Analyze
+        id: analyze-java
         uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          output: reports/security/codeql-java
+      - name: Enforce zero CodeQL alerts
+        env:
+          SARIF_DIR: ${{ steps.analyze-java.outputs.sarif-output }}
+        run: python3 .github/scripts/validate_codeql_sarif.py "$SARIF_DIR"
+      - name: Upload CodeQL SARIF evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-java-sarif-${{ github.run_id }}
+          path: reports/security/codeql-java/
+          if-no-files-found: error
+          retention-days: 14
+
+  codeql-automation:
+    name: CodeQL Python and Actions
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate zero-alert security implementation
+        run: |
+          python3 -m py_compile .github/scripts/validate_codeql_sarif.py .github/scripts/validate_codeql_sarif_selfcheck.py .github/scripts/validate_security_stack.py
+          python3 .github/scripts/validate_codeql_sarif_selfcheck.py
+          python3 .github/scripts/validate_security_stack.py
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: python,actions
+          queries: security-extended
+      - name: Analyze
+        id: analyze-automation
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          output: reports/security/codeql-automation
+      - name: Enforce zero CodeQL alerts
+        env:
+          SARIF_DIR: ${{ steps.analyze-automation.outputs.sarif-output }}
+        run: python3 .github/scripts/validate_codeql_sarif.py "$SARIF_DIR"
+      - name: Upload CodeQL SARIF evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-automation-sarif-${{ github.run_id }}
+          path: reports/security/codeql-automation/
+          if-no-files-found: error
+          retention-days: 14
 
   maven-dependencies:
     name: Maven dependency vulnerabilities
@@ -334,13 +393,14 @@ jobs:
   security-gate:
     name: security-gate
     if: always()
-    needs: [codeql, maven-dependencies, postgres-image, trivy-repository, dependency-review]
+    needs: [codeql-java, codeql-automation, maven-dependencies, postgres-image, trivy-repository, dependency-review]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Evaluate security jobs
         env:
-          CODEQL: ${{ needs.codeql.result }}
+          CODEQL_JAVA: ${{ needs.codeql-java.result }}
+          CODEQL_AUTOMATION: ${{ needs.codeql-automation.result }}
           MAVEN_DEPENDENCIES: ${{ needs.maven-dependencies.result }}
           POSTGRES_IMAGE: ${{ needs.postgres-image.result }}
           TRIVY_REPOSITORY: ${{ needs.trivy-repository.result }}
@@ -354,9 +414,11 @@ jobs:
           [[ "$POSTGRES_IMAGE" == "success" ]] || { echo "postgres-image=$POSTGRES_IMAGE"; exit 1; }
           [[ "$TRIVY_REPOSITORY" == "success" ]] || { echo "trivy-repository=$TRIVY_REPOSITORY"; exit 1; }
           if [[ "$SAME_REPOSITORY_PR" == "true" ]]; then
-            [[ "$CODEQL" == "success" ]] || { echo "codeql=$CODEQL"; exit 1; }
+            [[ "$CODEQL_JAVA" == "success" ]] || { echo "codeql-java=$CODEQL_JAVA"; exit 1; }
+            [[ "$CODEQL_AUTOMATION" == "success" ]] || { echo "codeql-automation=$CODEQL_AUTOMATION"; exit 1; }
           else
-            [[ "$CODEQL" == "skipped" || "$CODEQL" == "success" ]] || { echo "codeql=$CODEQL"; exit 1; }
+            [[ "$CODEQL_JAVA" == "skipped" || "$CODEQL_JAVA" == "success" ]] || { echo "codeql-java=$CODEQL_JAVA"; exit 1; }
+            [[ "$CODEQL_AUTOMATION" == "skipped" || "$CODEQL_AUTOMATION" == "success" ]] || { echo "codeql-automation=$CODEQL_AUTOMATION"; exit 1; }
           fi
           if [[ "$EVENT" == "pull_request" ]]; then
             [[ "$DEPENDENCY_REVIEW" == "success" ]] || { echo "dependency-review=$DEPENDENCY_REVIEW"; exit 1; }
