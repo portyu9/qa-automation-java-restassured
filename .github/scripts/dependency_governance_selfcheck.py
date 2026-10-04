@@ -405,6 +405,30 @@ class DependencyGovernanceTests(unittest.TestCase):
         self.assertIsNone(ACTION_LINE.fullmatch("      - uses: actions/checkout@v7"))
         self.assertIsNone(ACTION_LINE.fullmatch("      - uses: ./local-action"))
 
+    def test_named_step_action_pin_update_is_eligible(self) -> None:
+        file = ".github/workflows/security.yml"
+        before = (
+            "steps:\n"
+            "  - name: Initialize CodeQL\n"
+            "    uses: github/codeql-action/init@" + "a" * 40 + " # v4.38.0\n"
+        )
+        after = (
+            "steps:\n"
+            "  - name: Initialize CodeQL\n"
+            "    uses: github/codeql-action/init@" + "b" * 40 + " # v4.38.2\n"
+        )
+        metadata = [
+            {
+                "name": "github/codeql-action/init",
+                "version": "4.38.2",
+                "updateType": "version-update:semver-patch",
+            }
+        ]
+        result = validate_actions_semantic_change(
+            [{"filename": file}], {file: before}, {file: after}, metadata, CONFIG
+        )
+        self.assertTrue(result["eligible"], result["reasons"])
+
     def test_actions_patch_update_is_eligible(self) -> None:
         file = ".github/workflows/ci.yml"
         before = "steps:\n  - uses: actions/checkout@" + "a" * 40 + " # v7.0.1\n"
