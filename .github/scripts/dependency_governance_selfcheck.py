@@ -401,8 +401,10 @@ class DependencyGovernanceTests(unittest.TestCase):
 
     def test_action_line_requires_immutable_sha_and_version_annotation(self) -> None:
         good = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
-        nested = "        uses: actions/checkout@" + "a" * 40 + " # v7.0.1"\n        self.assertIsNotNone(ACTION_LINE.fullmatch(good))
-        self.assertIsNotNone(ACTION_LINE.fullmatch(nested))\n        self.assertIsNone(ACTION_LINE.fullmatch("      - uses: actions/checkout@v7"))
+        nested = "        uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
+        self.assertIsNotNone(ACTION_LINE.fullmatch(good))
+        self.assertIsNotNone(ACTION_LINE.fullmatch(nested))
+        self.assertIsNone(ACTION_LINE.fullmatch("      - uses: actions/checkout@v7"))
         self.assertIsNone(ACTION_LINE.fullmatch("      - uses: ./local-action"))
 
     def test_actions_named_step_patch_update_is_eligible_without_yaml_structure_change(self) -> None:
