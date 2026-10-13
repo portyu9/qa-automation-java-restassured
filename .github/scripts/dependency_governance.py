@@ -197,9 +197,9 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         if (
             not isinstance(maven_updates, list)
             or not maven_updates
-            or any("major" in str(update) for update in maven_updates)
+            or any(not re.fullmatch(r"(?:version|security)-update:semver-(?:patch|minor|major)", str(update)) for update in maven_updates)
         ):
-            errors.append("maven allowedUpdateTypes must exist and never include major updates")
+            errors.append("maven allowedUpdateTypes must include only recognized semver update classes")
 
     actions = ecosystems.get("github-actions")
     if not isinstance(actions, dict):
@@ -728,8 +728,10 @@ def validate_maven_wrapper_semantic_change(
             )
         elif old_version is not None:
             risk = compare_versions(old_version, new_version)
-            if risk not in {"patch", "minor"}:
-                reasons.append(f"{MAVEN_WRAPPER_DEPENDENCY} Maven Wrapper transition is {risk}")
+            if risk not in {"patch", "minor", "major", "major-risk"} or not str(update_type).endswith(
+                "semver-" + ("minor" if risk == "major-risk" else risk)
+            ):
+                reasons.append(f"{MAVEN_WRAPPER_DEPENDENCY} Maven Wrapper transition is {risk} or signed class mismatches")
             else:
                 changes.append(
                     {
@@ -819,8 +821,10 @@ def validate_maven_semantic_change(
                     )
                     continue
                 risk = compare_versions(old_version, new_version)
-                if risk not in {"patch", "minor"}:
-                    reasons.append(f"{name} Maven transition is {risk}")
+                if risk not in {"patch", "minor", "major", "major-risk"} or not str(update_type).endswith(
+                    "semver-" + ("minor" if risk == "major-risk" else risk)
+                ):
+                    reasons.append(f"{name} Maven transition is {risk} or signed class mismatches")
                     continue
                 changes.append(
                     {
@@ -863,8 +867,10 @@ def validate_maven_semantic_change(
                 )
                 continue
             risk = compare_versions(old_version, new_version)
-            if risk not in {"patch", "minor"}:
-                reasons.append(f"{coordinate} Maven transition is {risk}")
+            if risk not in {"patch", "minor", "major", "major-risk"} or not str(update_type).endswith(
+                "semver-" + ("minor" if risk == "major-risk" else risk)
+            ):
+                reasons.append(f"{coordinate} Maven transition is {risk} or signed class mismatches")
                 continue
             changes.append(
                 {
@@ -1252,7 +1258,7 @@ def render_comment(
             "> Safety invariant: privileged governance executes only trusted default-branch code, "
             "requires an untouched GitHub-signed Dependabot commit directly on current main, proves "
             "exact workflow identities and stable gates for the exact head, never rewrites Dependabot "
-            "branches directly, and never autonomously merges major, downgrade, stale-base, aged-out, "
+            "branches directly, and never autonomously merges downgrade, stale-base, aged-out, "
             "control-plane, or semantically ambiguous changes.",
             "",
         ]

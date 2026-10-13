@@ -70,8 +70,10 @@
       "allowedUpdateTypes": [
         "version-update:semver-patch",
         "version-update:semver-minor",
+        "version-update:semver-major",
         "security-update:semver-patch",
-        "security-update:semver-minor"
+        "security-update:semver-minor",
+        "security-update:semver-major"
       ]
     },
     "github-actions": {
