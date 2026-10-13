@@ -295,9 +295,15 @@ class DependencyGovernanceTests(unittest.TestCase):
         plugin = base.replace("3.6.0", "3.6.1")
         self.assertFalse(validate_maven_semantic_change(base, plugin, signed, CONFIG)["eligible"])
         major = base.replace("2.22.2", "3.0.0")
-        self.assertFalse(validate_maven_semantic_change(base, major, [{
-            **signed[0], "version": "3.0.0", "updateType": "version-update:semver-major",
-        }], CONFIG)["eligible"])
+        signed_major = [{**signed[0], "version": "3.0.0",
+                         "updateType": "version-update:semver-major"}]
+        result = validate_maven_semantic_change(base, major, signed_major, CONFIG)
+        self.assertTrue(result["eligible"], result["reasons"])
+        self.assertEqual(result["changes"][0]["risk"], "major")
+        misclassified = [{**signed_major[0], "updateType": "version-update:semver-patch"}]
+        self.assertFalse(validate_maven_semantic_change(
+            base, major, misclassified, CONFIG
+        )["eligible"])
         structure = base.replace("</properties>", "    <new.policy>true</new.policy>\n  </properties>")
         self.assertFalse(validate_maven_semantic_change(base, structure, signed, CONFIG)["eligible"])
 
@@ -394,11 +400,14 @@ class DependencyGovernanceTests(unittest.TestCase):
             "3.9.16/apache-maven-3.9.16-bin.zip",
             "4.0.0/apache-maven-4.0.0-bin.zip",
         ).replace("a" * 64, "b" * 64)
-        self.assertFalse(
-            validate_maven_semantic_change(
-                pom, pom, major_metadata, CONFIG, before, major
-            )["eligible"]
+        valid_major = validate_maven_semantic_change(
+            pom, pom, major_metadata, CONFIG, before, major
         )
+        self.assertTrue(valid_major["eligible"], valid_major["reasons"])
+        self.assertFalse(validate_maven_semantic_change(
+            pom, pom, [{**major_metadata[0], "updateType": "version-update:semver-minor"}],
+            CONFIG, before, major
+        )["eligible"])
 
     def test_action_line_requires_immutable_sha_and_version_annotation(self) -> None:
         good = "      - uses: actions/checkout@" + "a" * 40 + " # v7.0.1"
