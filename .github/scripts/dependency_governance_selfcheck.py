@@ -309,7 +309,9 @@ class DependencyGovernanceTests(unittest.TestCase):
 
     def test_signed_maven_plugin_versions_require_exact_scope(self) -> None:
         before = """<project>
-  <properties><client.version>1.2.3</client.version></properties>
+  <properties>
+    <client.version>1.2.3</client.version>
+  </properties>
   <dependencies>
     <dependency>
       <groupId>org.example</groupId>
