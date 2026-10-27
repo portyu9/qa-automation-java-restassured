@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from xml.parsers import expat
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = ROOT / ".github" / "dependency-governance.json"
@@ -602,41 +603,88 @@ def validate_actions_semantic_change(
     return {"eligible": not reasons, "reasons": unique(reasons), "changes": changes}
 
 
-def _maven_dependency_coordinate(lines: list[str], index: int) -> str | None:
-    start = None
-    for cursor in range(index, -1, -1):
-        if "</dependency>" in lines[cursor]:
-            return None
-        if "<dependency>" in lines[cursor]:
-            start = cursor
-            break
-    if start is None:
-        return None
-    end = None
-    for cursor in range(index, len(lines)):
-        if "<dependency>" in lines[cursor] and cursor != start:
-            return None
-        if "</dependency>" in lines[cursor]:
-            end = cursor
-            break
-    if end is None:
-        return None
-    block = "\n".join(lines[start : end + 1])
-    group = re.search(r"<groupId>\s*([^<]+?)\s*</groupId>", block)
-    artifact = re.search(r"<artifactId>\s*([^<]+?)\s*</artifactId>", block)
-    if not group or not artifact:
-        return None
-    return f"{group.group(1).strip()}:{artifact.group(1).strip()}"
+def _maven_scoped_version_coordinates(text: str) -> dict[int, str]:
+    """Resolve only direct Maven dependency/plugin version leaves by XML ancestry.
+
+    Expat tracks actual XML nodes instead of text-shaped tags: comments, plugin
+    configuration, nested plugin dependencies and pluginManagement cannot
+    impersonate project/build/plugins/plugin/version. Repeated coordinates or
+    ambiguous direct identifiers fail closed.
+    """
+    if "<!DOCTYPE" in text.upper():
+        return {}
+
+    permitted_parents = {
+        ("project", "dependencies", "dependency"),
+        ("project", "dependencyManagement", "dependencies", "dependency"),
+        ("project", "profiles", "profile", "dependencies", "dependency"),
+        ("project", "profiles", "profile", "dependencyManagement", "dependencies", "dependency"),
+        ("project", "build", "plugins", "plugin"),
+    }
+    frames: list[dict[str, Any]] = []
+    candidates: list[tuple[int, str]] = []
+    parser = expat.ParserCreate(namespace_separator="}")
+
+    def start(name: str, _attrs: dict[str, str]) -> None:
+        frames.append({
+            "name": name.rsplit("}", 1)[-1],
+            "line": parser.CurrentLineNumber - 1,
+            "text": [],
+            "children": [],
+        })
+
+    def characters(data: str) -> None:
+        if frames:
+            frames[-1]["text"].append(data)
+
+    def end(_name: str) -> None:
+        node = frames.pop()
+        path = tuple(part["name"] for part in frames) + (node["name"],)
+        if path in permitted_parents:
+            members: dict[str, list[dict[str, Any]]] = {}
+            for child in node["children"]:
+                members.setdefault(child["name"], []).append(child)
+            if all(len(members.get(key, [])) == 1 for key in ("groupId", "artifactId", "version")):
+                group, artifact, version = (
+                    members[key][0] for key in ("groupId", "artifactId", "version")
+                )
+                identity = [group, artifact, version]
+                if all(not part["children"] for part in identity):
+                    group_text = "".join(group["text"]).strip()
+                    artifact_text = "".join(artifact["text"]).strip()
+                    if (re.fullmatch(r"[A-Za-z0-9_.-]+", group_text)
+                            and re.fullmatch(r"[A-Za-z0-9_.-]+", artifact_text)):
+                        candidates.append((version["line"], f"{group_text}:{artifact_text}"))
+        if frames:
+            frames[-1]["children"].append(node)
+
+    parser.StartElementHandler = start
+    parser.CharacterDataHandler = characters
+    parser.EndElementHandler = end
+    try:
+        parser.Parse(text, True)
+    except expat.ExpatError:
+        return {}
+
+    counts: dict[str, int] = {}
+    for _, coordinate in candidates:
+        counts[coordinate] = counts.get(coordinate, 0) + 1
+    return {
+        line: coordinate
+        for line, coordinate in candidates
+        if counts[coordinate] == 1
+    }
 
 
 def _maven_property_consumers(text: str) -> dict[str, set[str]]:
     lines = text.splitlines()
+    scoped_versions = _maven_scoped_version_coordinates(text)
     consumers: dict[str, set[str]] = {}
     for index, line in enumerate(lines):
         match = re.fullmatch(r"\s*<version>\$\{([A-Za-z0-9_.-]+)\}</version>\s*", line)
         if not match:
             continue
-        coordinate = _maven_dependency_coordinate(lines, index)
+        coordinate = scoped_versions.get(index)
         if coordinate:
             consumers.setdefault(match.group(1), set()).add(coordinate)
     return consumers
@@ -774,6 +822,7 @@ def validate_maven_semantic_change(
     metadata_by_name = {item.get("name"): item for item in metadata if item.get("name")}
     allowed_updates = set(config["ecosystems"]["maven"]["allowedUpdateTypes"])
     property_consumers = _maven_property_consumers(base_text)
+    scoped_versions = _maven_scoped_version_coordinates(base_text)
     proven_names: set[str] = set()
 
     property_line = re.compile(
@@ -841,10 +890,10 @@ def validate_maven_semantic_change(
         old_version_match = direct_version_line.fullmatch(old_line)
         new_version_match = direct_version_line.fullmatch(new_line)
         if old_version_match and new_version_match:
-            coordinate = _maven_dependency_coordinate(before, index)
+            coordinate = scoped_versions.get(index)
             if not coordinate:
                 reasons.append(
-                    f"pom.xml:{index + 1} changes a version outside a dependency declaration"
+                    f"pom.xml:{index + 1} changes a version outside a governed dependency or direct plugin declaration"
                 )
                 continue
             signed = metadata_by_name.get(coordinate)
