@@ -307,6 +307,115 @@ class DependencyGovernanceTests(unittest.TestCase):
         structure = base.replace("</properties>", "    <new.policy>true</new.policy>\n  </properties>")
         self.assertFalse(validate_maven_semantic_change(base, structure, signed, CONFIG)["eligible"])
 
+    def test_signed_maven_plugin_versions_require_exact_scope(self) -> None:
+        before = """<project>
+  <properties>
+    <client.version>1.2.3</client.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>client</artifactId>
+      <version>${client.version}</version>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.6.0</version>
+        <configuration><version>9.9.9</version></configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>3.6.0</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>"""
+        after = before.replace("1.2.3</client.version>", "1.2.4</client.version>") \
+            .replace("<version>3.6.0</version>", "<version>3.6.1</version>")
+        signed = [
+            {"name": "org.example:client", "version": "1.2.4",
+             "updateType": "version-update:semver-patch"},
+            {"name": "org.apache.maven.plugins:maven-surefire-plugin",
+             "version": "3.6.1", "updateType": "version-update:semver-patch"},
+            {"name": "org.apache.maven.plugins:maven-failsafe-plugin",
+             "version": "3.6.1", "updateType": "version-update:semver-patch"},
+        ]
+        result = validate_maven_semantic_change(before, after, signed, CONFIG)
+        self.assertTrue(result["eligible"], result["reasons"])
+        self.assertEqual({c["name"] for c in result["changes"]},
+                         {s["name"] for s in signed})
+
+        # Signed metadata must match every plugin and exact patch classification.
+        for invalid in (
+            signed[:2],
+            [signed[0], {**signed[1], "version": "3.6.2"}, signed[2]],
+            [signed[0], {**signed[1], "updateType": "version-update:semver-minor"}, signed[2]],
+        ):
+            self.assertFalse(validate_maven_semantic_change(
+                before, after, invalid, CONFIG
+            )["eligible"])
+
+        # Direct project/build/plugins/plugin/version is the ONLY accepted
+        # plugin path: pluginManagement, reporting, config, nested dependencies
+        # and unsigned plugin versions must fail closed.
+        for original, proposed in (
+            (before.replace("<plugins>", "<pluginManagement><plugins>")
+                   .replace("</plugins>", "</plugins></pluginManagement>"),
+             None),
+            (before.replace("<build>", "<reporting>")
+                   .replace("</build>", "</reporting>"), None),
+        ):
+            proposed = original.replace("<version>3.6.0</version>",
+                                        "<version>3.6.1</version>")
+            self.assertFalse(validate_maven_semantic_change(
+                original, proposed, signed[1:], CONFIG
+            )["eligible"])
+        config_changed = before.replace(
+            "<configuration><version>9.9.9</version></configuration>",
+            "<configuration><version>9.9.10</version></configuration>",
+        )
+        self.assertFalse(validate_maven_semantic_change(
+            before, config_changed,
+            [{"name": "org.apache.maven.plugins:maven-surefire-plugin",
+              "version": "9.9.10", "updateType": "version-update:semver-patch"}],
+            CONFIG
+        )["eligible"])
+        duplicate = before.replace(
+            "    </plugins>",
+            """      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.6.0</version>
+      </plugin>
+    </plugins>""",
+        )
+        self.assertFalse(validate_maven_semantic_change(
+            duplicate, duplicate.replace("<version>3.6.0</version>",
+                                          "<version>3.6.1</version>", 1),
+            [signed[1]], CONFIG
+        )["eligible"])
+        spoofed = before.replace(
+            "<build>",
+            "<!-- <build><plugins><plugin><groupId>evil</groupId>"
+            "<artifactId>fake</artifactId><version>0.0.1</version>"
+            "</plugin></plugins></build> -->\n  <build>",
+        )
+        self.assertFalse(validate_maven_semantic_change(
+            spoofed, spoofed.replace("<version>9.9.9</version>",
+                                     "<version>9.9.10</version>"),
+            [{"name": "evil:fake", "version": "9.9.10",
+              "updateType": "version-update:semver-patch"}], CONFIG
+        )["eligible"])
+        self.assertFalse(validate_maven_semantic_change(
+            before, before.replace("</plugins>", "<plugin></plugin></plugins>"),
+            signed, CONFIG
+        )["eligible"])
+
     def test_maven_wrapper_and_dependency_group_is_semantically_eligible(self) -> None:
         pom_before = """<project>
   <dependencies>
