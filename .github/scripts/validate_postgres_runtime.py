@@ -12,8 +12,8 @@ SECURITY = ROOT / ".github" / "workflows" / "security.yml"
 IMAGE_NAME = "qa-restassured-postgres:16.15-hardened"
 DOCKERFILE_PATH = "docker/postgres-test.Dockerfile"
 GO_BUILDER = (
-    "golang:1.26.9-alpine3.24@sha256:"
-    "cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0"
+    "golang:1.26.10-alpine3.24@sha256:"
+    "5cb67f19c5e7994dcb80c074f7cfca8aeeada45bbdca035f73df269cefdcce61"
 )
 POSTGRES_BASE = (
     "postgres:16.15-alpine@sha256:"
@@ -68,7 +68,7 @@ def validate(errors: list[str]) -> None:
         "ENV CGO_ENABLED=0",
         "go mod download",
         "go build -trimpath -ldflags='-d -w' -buildvcs=true -o /out/gosu github.com/tianon/gosu",
-        "grep -F 'go1.26.9' /out/gosu-build-info.txt",
+        "grep -F 'go1.26.10' /out/gosu-build-info.txt",
         "COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu",
         f"'libcrypto3={OPENSSL_VERSION}'",
         f"'libssl3={OPENSSL_VERSION}'",

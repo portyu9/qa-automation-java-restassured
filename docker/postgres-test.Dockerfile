@@ -1,4 +1,4 @@
-FROM golang:1.26.9-alpine3.24@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS gosu-builder
+FROM golang:1.26.10-alpine3.24@sha256:5cb67f19c5e7994dcb80c074f7cfca8aeeada45bbdca035f73df269cefdcce61 AS gosu-builder
 
 ARG GOSU_COMMIT=6456aaa0f3c854d199d0f037f068eb97515b7513
 ARG GOSU_TAG=1.19
@@ -16,7 +16,7 @@ RUN set -eux; \
     go mod download; \
     go build -trimpath -ldflags='-d -w' -buildvcs=true -o /out/gosu github.com/tianon/gosu; \
     go version -m /out/gosu | tee /out/gosu-build-info.txt; \
-    grep -F 'go1.26.9' /out/gosu-build-info.txt; \
+    grep -F 'go1.26.10' /out/gosu-build-info.txt; \
     /out/gosu --version; \
     /out/gosu nobody true
 
