@@ -189,7 +189,7 @@ jobs:
       - name: Scan test-scope SBOM for HIGH/CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.74.0
+          version: v0.76.1
           scan-type: sbom
           scan-ref: reports/security/maven/security-bom.json
           scanners: vuln
@@ -205,7 +205,7 @@ jobs:
           set -euo pipefail
           report="reports/security/maven/trivy-sbom.json"
           [[ -s "$report" ]] || { echo "Trivy did not produce Maven SBOM vulnerability evidence" >&2; exit 1; }
-          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.74.0")' "$report" >/dev/null
+          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.76.1")' "$report" >/dev/null
           findings=$(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$report")
           {
             echo '### Maven test-dependency vulnerability gate'
@@ -214,7 +214,7 @@ jobs:
             echo '- SBOM scope: direct and transitive dependencies including Maven test scope'
             echo "- Jackson alignment: \`${JACKSON_VERSION}\` via imported BOM (from pom.xml)"
             echo "- Fixed HIGH/CRITICAL findings: ${findings}"
-            echo '- Scanner: Trivy v0.74.0 SBOM mode'
+            echo '- Scanner: Trivy v0.76.1 SBOM mode'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Maven dependency security evidence
         if: always()
@@ -245,7 +245,7 @@ jobs:
       - name: Scan exact Testcontainers image for HIGH/CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.74.0
+          version: v0.76.1
           scan-type: image
           image-ref: ${{ env.POSTGRES_TEST_IMAGE }}
           scanners: vuln
@@ -266,7 +266,7 @@ jobs:
           [[ -s "$report" ]] || { echo 'Trivy did not produce PostgreSQL image evidence' >&2; exit 1; }
           jq -e --arg image "$POSTGRES_TEST_IMAGE" '
             (.SchemaVersion == 2)
-            and (.Trivy.Version == "0.74.0")
+            and (.Trivy.Version == "0.76.1")
             and (.ArtifactName == $image)
             and ((.Results // []) | type == "array")
             and (((.Results // []) | length) > 0)
@@ -282,7 +282,7 @@ jobs:
             echo '- gosu: 1.19 exact upstream commit, rebuilt with digest-pinned Go 1.26.6 / CGO disabled'
             echo '- OpenSSL: Alpine 3.24 libcrypto3/libssl3 3.5.8-r0'
             echo "- Fixed HIGH/CRITICAL findings: ${findings}"
-            echo '- Scanner: Trivy v0.74.0 image mode'
+            echo '- Scanner: Trivy v0.76.1 image mode'
             echo '- Provenance: the same repository-owned Dockerfile is validated, built by Testcontainers in integration jobs, rebuilt here, and scanned without severity exceptions'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload PostgreSQL image security evidence
@@ -306,7 +306,7 @@ jobs:
       - name: Scan repository configuration and secrets
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.74.0
+          version: v0.76.1
           scan-type: fs
           scan-ref: .
           scanners: misconfig,secret
@@ -325,7 +325,7 @@ jobs:
             printf '### Repository security gate\n\nTrivy did not produce a report. Treating missing scanner evidence as a gate failure.\n' | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.74.0")' "$report" >/dev/null
+          jq -e '(.SchemaVersion == 2) and (.Trivy.Version == "0.76.1")' "$report" >/dev/null
           misconfigurations=$(jq '[.Results[]? | .Misconfigurations[]?] | length' "$report")
           secrets=$(jq '[.Results[]? | .Secrets[]?] | length' "$report")
           {
@@ -336,7 +336,7 @@ jobs:
             echo "| HIGH/CRITICAL misconfigurations | ${misconfigurations} |"
             echo "| Gated secret findings | ${secrets} |"
             echo
-            echo '- Scanner: Trivy v0.74.0'
+            echo '- Scanner: Trivy v0.76.1'
             echo '- Scope: repository configuration and committed secret material; Maven and PostgreSQL runtime vulnerability scanning are separate attributed jobs'
           } | tee "$summary" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload repository security evidence
