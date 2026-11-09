@@ -25,16 +25,19 @@ FROM postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0
 COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 
 RUN set -eux; \
-    # Fetch the official, signed Alpine 3.24 main index explicitly.
-    # This avoids stale image/mirror indices omitting already-published fixes.
-    # Never use --allow-untrusted or disable vulnerability scanning.
-    apk -U add --no-cache --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/main \
+    # The base-image APK index may lag Alpine's signed package repository.
+    # Verify the exact patched upstream APK before installing it, fail closed.
+    zlib_apk='/tmp/zlib-1.3.2-r1.apk'; \
+    wget -q -O "$zlib_apk" "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/$(apk --print-arch)/zlib-1.3.2-r1.apk"; \
+    apk verify "$zlib_apk"; \
+    apk add --no-cache \
+        "$zlib_apk" \
         'musl=1.2.6-r3' \
         'musl-utils=1.2.6-r3' \
-        'zlib=1.3.2-r1' \
         'libcrypto3=3.5.9-r0' \
         'libssl3=3.5.9-r0' \
         'libuuid=2.42.3-r1'; \
+    rm -f "$zlib_apk"; \
     apk list --installed musl 2>/dev/null | grep -q '^musl-1\.2\.6-r3 '; \
     apk list --installed musl-utils 2>/dev/null | grep -q '^musl-utils-1\.2\.6-r3 '; \
     apk list --installed zlib 2>/dev/null | grep -q '^zlib-1\.3\.2-r1 '; \
