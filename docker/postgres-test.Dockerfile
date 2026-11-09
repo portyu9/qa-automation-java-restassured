@@ -28,7 +28,7 @@ RUN set -eux; \
     # Fetch the official, signed Alpine 3.24 main index explicitly.
     # This avoids stale image/mirror indices omitting already-published fixes.
     # Never use --allow-untrusted or disable vulnerability scanning.
-    apk add --no-cache --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/main \
+    apk -U add --no-cache --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/main \
         'musl=1.2.6-r3' \
         'musl-utils=1.2.6-r3' \
         'zlib=1.3.2-r1' \
