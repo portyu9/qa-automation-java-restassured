@@ -26,9 +26,15 @@ COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 
 RUN set -eux; \
     apk add --no-cache \
+        'musl=1.2.6-r3' \
+        'musl-utils=1.2.6-r3' \
+        'zlib=1.3.2-r1' \
         'libcrypto3=3.5.9-r0' \
         'libssl3=3.5.9-r0' \
         'libuuid=2.42.3-r1'; \
+    apk list --installed musl 2>/dev/null | grep -q '^musl-1\.2\.6-r3 '; \
+    apk list --installed musl-utils 2>/dev/null | grep -q '^musl-utils-1\.2\.6-r3 '; \
+    apk list --installed zlib 2>/dev/null | grep -q '^zlib-1\.3\.2-r1 '; \
     apk list --installed libcrypto3 2>/dev/null | grep -q '^libcrypto3-3\.5\.9-r0 '; \
     apk list --installed libssl3 2>/dev/null | grep -q '^libssl3-3\.5\.9-r0 '; \
     apk list --installed libuuid 2>/dev/null | grep -q '^libuuid-2\.42\.3-r1 '; \
