@@ -23,6 +23,8 @@ GOSU_TAG = "1.19"
 GOSU_COMMIT = "6456aaa0f3c854d199d0f037f068eb97515b7513"
 OPENSSL_VERSION = "3.5.9-r0"
 LIBUUID_VERSION = "2.42.3-r1"
+KRB5_VERSION = "1.22.3-r0"
+LIBXSLT_VERSION = "1.1.43-r4"
 
 
 def _require(text: str, token: str, surface: str, errors: list[str]) -> None:
@@ -73,9 +75,13 @@ def validate(errors: list[str]) -> None:
         f"'libcrypto3={OPENSSL_VERSION}'",
         f"'libssl3={OPENSSL_VERSION}'",
         f"'libuuid={LIBUUID_VERSION}'",
+        f"'krb5-libs={KRB5_VERSION}'",
+        f"'libxslt={LIBXSLT_VERSION}'",
         r"grep -q '^libcrypto3-3\.5\.9-r0 '",
         r"grep -q '^libssl3-3\.5\.9-r0 '",
         r"grep -q '^libuuid-2\.42\.3-r1 '",
+        r"grep -q '^krb5-libs-1\.22\.3-r0 '",
+        r"grep -q '^libxslt-1\.1\.43-r4 '",
         "gosu nobody true",
         "USER postgres",
     )
