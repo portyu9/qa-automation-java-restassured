@@ -36,7 +36,9 @@ RUN set -eux; \
         'musl-utils=1.2.6-r3' \
         'libcrypto3=3.5.9-r0' \
         'libssl3=3.5.9-r0' \
-        'libuuid=2.42.3-r1'; \
+        'libuuid=2.42.3-r1' \
+        'krb5-libs=1.22.3-r0' \
+        'libxslt=1.1.43-r4'; \
     rm -f "$zlib_apk"; \
     apk list --installed musl 2>/dev/null | grep -q '^musl-1\.2\.6-r3 '; \
     apk list --installed musl-utils 2>/dev/null | grep -q '^musl-utils-1\.2\.6-r3 '; \
@@ -44,6 +46,8 @@ RUN set -eux; \
     apk list --installed libcrypto3 2>/dev/null | grep -q '^libcrypto3-3\.5\.9-r0 '; \
     apk list --installed libssl3 2>/dev/null | grep -q '^libssl3-3\.5\.9-r0 '; \
     apk list --installed libuuid 2>/dev/null | grep -q '^libuuid-2\.42\.3-r1 '; \
+    apk list --installed krb5-libs 2>/dev/null | grep -q '^krb5-libs-1\.22\.3-r0 '; \
+    apk list --installed libxslt 2>/dev/null | grep -q '^libxslt-1\.1\.43-r4 '; \
     gosu --version; \
     gosu nobody true
 
