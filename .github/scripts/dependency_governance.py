@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from xml.parsers import expat
@@ -127,6 +127,10 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         value = config.get(key)
         if not isinstance(value, int) or value < 1 or value > maximum:
             errors.append(f"{key} must be an integer from 1 to {maximum}")
+
+    lease = config.get("nativeRefreshEscalationMinutes")
+    if type(lease) is not int or not 30 <= lease <= 1440:
+        errors.append("nativeRefreshEscalationMinutes must be an integer from 30 to 1440")
 
     labels = config.get("manualReviewLabels")
     if not isinstance(labels, list) or not labels or not all(nonempty(x) for x in labels):
@@ -1441,31 +1445,64 @@ def request_dependabot_refresh(
     owner_api: GitHubApi | None,
     assessment: Assessment,
     config: dict[str, Any],
+    *,
+    observed_at: datetime | None = None,
 ) -> bool:
+    """Escalate an ignored signed native rebase once, without mutating bot refs."""
     stale_reason = "PR is not rebased directly on the current base branch head"
     if assessment.provenance.get("reasons") != [stale_reason]:
         return False
     verify_owner_identity(owner_api, config)
     assert owner_api is not None
+    now = observed_at if observed_at is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise GovernanceError("Dependabot refresh observation clock must be timezone-aware")
     number = int(assessment.pull["number"])
     head_sha = str((assessment.pull.get("head") or {}).get("sha") or "")
-    marker = f"{OWNER_REFRESH_MARKER}{head_sha}:{assessment.base_sha}:rebase -->"
     comments = owner_api.paginate(f"/issues/{number}/comments")
-    if any(
-        marker in str(comment.get("body") or "")
-        and (comment.get("user") or {}).get("login") == config["ownerApprovalLogin"]
-        and (comment.get("user") or {}).get("id") == config["ownerApprovalUserId"]
-        for comment in comments
-    ):
+
+    def marker(command: str) -> str:
+        return f"{OWNER_REFRESH_MARKER}{head_sha}:{assessment.base_sha}:{command} -->"
+
+    def matching(command: str) -> list[dict[str, Any]]:
+        return [
+            item for item in comments
+            if marker(command) in str(item.get("body") or "")
+            and (item.get("user") or {}).get("login") == config["ownerApprovalLogin"]
+            and (item.get("user") or {}).get("id") == config["ownerApprovalUserId"]
+            and item.get("performed_via_github_app") is None
+        ]
+
+    rebases = matching("rebase")
+    recreates = matching("recreate")
+    if len(rebases) > 1 or len(recreates) > 1:
+        raise GovernanceError("ambiguous owner-authenticated Dependabot refresh markers")
+
+    command = "rebase"
+    if rebases:
+        raw = rebases[0].get("created_at")
+        try:
+            issued = datetime.fromisoformat(raw.replace("Z", "+00:00")) if isinstance(raw, str) else None
+        except ValueError:
+            issued = None
+        # No trusted timestamp, no escalation; future timestamps also fail closed.
+        if issued is None or issued.tzinfo is None or now < issued.astimezone(timezone.utc):
+            return True
+        if now - issued.astimezone(timezone.utc) < timedelta(minutes=config["nativeRefreshEscalationMinutes"]):
+            return True
+        command = "recreate"
+    if (command == "rebase" and rebases) or (command == "recreate" and recreates):
         return True
+
     owner_api.post(
         f"/issues/{number}/comments",
         {"body": (
-            "@dependabot rebase\n\n"
-            f"{marker}\n"
-            "Requested by the configured push-capable repository owner because the exact "
-            "Dependabot source commit is no longer parented on current main. Qualification "
-            "restarts on the new exact head; no merge or security gate is bypassed."
+            f"@dependabot {command}\n\n"
+            f"{marker(command)}\n"
+            "Owner-authenticated native refresh against accepted main. Recreate is permitted "
+            "only after the configured rebase lease expires without a new signed Dependabot head. "
+            "Any replacement requires fresh canonical provenance and exact-head CI, extended, "
+            "security and docs gates. No privileged bot ref write or gate bypass."
         )},
     )
     return True

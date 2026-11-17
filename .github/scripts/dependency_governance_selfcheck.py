@@ -4,7 +4,7 @@ import io
 import json
 import unittest
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -108,6 +108,8 @@ class DependencyGovernanceTests(unittest.TestCase):
         }
         self.assertTrue(validate_config(major))
         self.assertTrue(validate_config({**CONFIG, "manualReviewPaths": []}))
+        for invalid in (None, False, "30", 0, 29, 1441, 30.5):
+            self.assertTrue(validate_config({**CONFIG, "nativeRefreshEscalationMinutes": invalid}))
 
     def test_positive_integer_parser(self) -> None:
         self.assertEqual(parse_positive_integer("54"), 54)
@@ -835,6 +837,61 @@ class DependencyGovernanceTests(unittest.TestCase):
         before = len(owner.comments)
         self.assertTrue(request_dependabot_refresh(owner, stale, CONFIG))
         self.assertEqual(len(owner.comments), before)
+
+        # An authentic signed source whose rebase was ignored must progress to
+        # native recreate at the exact lease boundary, never earlier or twice.
+        clock = datetime(2026, 11, 17, 0, tzinfo=timezone.utc)
+        lease = timedelta(minutes=CONFIG["nativeRefreshEscalationMinutes"])
+        issued_owner = OwnerApi(CONFIG["ownerApprovalLogin"], CONFIG["ownerApprovalUserId"])
+        self.assertTrue(request_dependabot_refresh(issued_owner, stale, CONFIG, observed_at=clock))
+        self.assertTrue(issued_owner.comments[0]["body"].startswith("@dependabot rebase\n"))
+        issued_owner.comments[0]["created_at"] = clock.isoformat()
+        request_dependabot_refresh(
+            issued_owner, stale, CONFIG,
+            observed_at=clock + lease - timedelta(microseconds=1),
+        )
+        self.assertEqual(len(issued_owner.comments), 1)
+        request_dependabot_refresh(issued_owner, stale, CONFIG, observed_at=clock + lease)
+        self.assertEqual(len(issued_owner.comments), 2)
+        self.assertTrue(issued_owner.comments[1]["body"].startswith("@dependabot recreate\n"))
+        self.assertIn(head, issued_owner.comments[1]["body"])
+        self.assertIn(stale.base_sha, issued_owner.comments[1]["body"])
+        request_dependabot_refresh(issued_owner, stale, CONFIG, observed_at=clock + timedelta(days=1))
+        self.assertEqual(len(issued_owner.comments), 2)
+        previous_head = stale.pull["head"]["sha"]
+        stale.pull["head"]["sha"] = "d" * 40
+        request_dependabot_refresh(issued_owner, stale, CONFIG, observed_at=clock + lease)
+        self.assertEqual(len(issued_owner.comments), 3)
+        self.assertTrue(issued_owner.comments[-1]["body"].startswith("@dependabot rebase\n"))
+        stale.pull["head"]["sha"] = previous_head
+        for bad_stamp in ("not-a-time", "2100-01-01T00:00:00Z"):
+            withheld = OwnerApi(CONFIG["ownerApprovalLogin"], CONFIG["ownerApprovalUserId"])
+            request_dependabot_refresh(withheld, stale, CONFIG, observed_at=clock)
+            withheld.comments[0]["created_at"] = bad_stamp
+            request_dependabot_refresh(withheld, stale, CONFIG, observed_at=clock + lease)
+            self.assertEqual(len(withheld.comments), 1)
+        impersonator = OwnerApi(CONFIG["ownerApprovalLogin"], CONFIG["ownerApprovalUserId"])
+        impersonator.comments.append({
+            "body": issued_owner.comments[0]["body"],
+            "created_at": clock.isoformat(),
+            "user": {"login": "attacker", "id": 123},
+        })
+        request_dependabot_refresh(impersonator, stale, CONFIG, observed_at=clock + lease)
+        self.assertEqual(len(impersonator.comments), 2)
+        self.assertTrue(impersonator.comments[-1]["body"].startswith("@dependabot rebase\n"))
+        with self.assertRaises(GovernanceError):
+            request_dependabot_refresh(issued_owner, stale, CONFIG, observed_at=datetime(2026, 11, 17, 0))
+        invalid = Assessment(
+            pull=stale.pull, base_sha=stale.base_sha, files=stale.files,
+            ecosystem=stale.ecosystem,
+            provenance={"eligible": False, "reasons": [
+                "PR is not rebased directly on the current base branch head",
+                "invalid bot signature",
+            ]},
+            metadata=stale.metadata, semantic=stale.semantic,
+            qualification=stale.qualification,
+        )
+        self.assertFalse(request_dependabot_refresh(issued_owner, invalid, CONFIG, observed_at=clock))
 
         with self.assertRaises(GovernanceError):
             ensure_owner_review_and_approval(
