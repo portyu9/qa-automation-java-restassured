@@ -24,30 +24,19 @@ FROM postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0
 
 COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu
 
-# The base-image APK index may lag Alpine's signed package repository.
-# Verify the exact patched upstream APK before installing it, fail closed.
+# Preserve immutable image provenance while consuming signed Alpine security updates.
+# Remediated package revisions are lower bounds, not fragile exact-index pins.
+# The mandatory Trivy image scan still rejects HIGH/CRITICAL CVEs.
 RUN set -eux; \
-    zlib_apk='/tmp/zlib-1.3.2-r1.apk'; \
-    wget -q -O "$zlib_apk" "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/$(apk --print-arch)/zlib-1.3.2-r1.apk"; \
-    apk verify "$zlib_apk"; \
-    apk add --no-cache \
-        "$zlib_apk" \
-        'musl=1.2.6-r3' \
-        'musl-utils=1.2.6-r3' \
-        'libcrypto3=3.5.9-r0' \
-        'libssl3=3.5.9-r0' \
-        'libuuid=2.42.3-r1' \
-        'krb5-libs=1.22.3-r0' \
-        'libxslt=1.1.43-r4'; \
-    rm -f "$zlib_apk"; \
-    apk list --installed musl 2>/dev/null | grep -q '^musl-1\.2\.6-r3 '; \
-    apk list --installed musl-utils 2>/dev/null | grep -q '^musl-utils-1\.2\.6-r3 '; \
-    apk list --installed zlib 2>/dev/null | grep -q '^zlib-1\.3\.2-r1 '; \
-    apk list --installed libcrypto3 2>/dev/null | grep -q '^libcrypto3-3\.5\.9-r0 '; \
-    apk list --installed libssl3 2>/dev/null | grep -q '^libssl3-3\.5\.9-r0 '; \
-    apk list --installed libuuid 2>/dev/null | grep -q '^libuuid-2\.42\.3-r1 '; \
-    apk list --installed krb5-libs 2>/dev/null | grep -q '^krb5-libs-1\.22\.3-r0 '; \
-    apk list --installed libxslt 2>/dev/null | grep -q '^libxslt-1\.1\.43-r4 '; \
+    apk add --no-cache --upgrade \
+        'zlib>=1.3.2-r1' \
+        'musl>=1.2.6-r3' \
+        'musl-utils>=1.2.6-r3' \
+        'libcrypto3>=3.5.9-r0' \
+        'libssl3>=3.5.9-r0' \
+        'libuuid>=2.42.3-r1' \
+        'krb5-libs>=1.22.3-r0' \
+        'libxslt>=1.1.43-r4'; \
     gosu --version; \
     gosu nobody true
 

@@ -21,10 +21,18 @@ POSTGRES_BASE = (
 )
 GOSU_TAG = "1.19"
 GOSU_COMMIT = "6456aaa0f3c854d199d0f037f068eb97515b7513"
-OPENSSL_VERSION = "3.5.9-r0"
-LIBUUID_VERSION = "2.42.3-r1"
-KRB5_VERSION = "1.22.3-r0"
-LIBXSLT_VERSION = "1.1.43-r4"
+# Minimum fixed package revisions within signed Alpine v3.24 repositories.
+# Later upstream patches remain valid; older vulnerable revisions do not.
+MINIMUM_APK_VERSIONS = {
+    "zlib": "1.3.2-r1",
+    "musl": "1.2.6-r3",
+    "musl-utils": "1.2.6-r3",
+    "libcrypto3": "3.5.9-r0",
+    "libssl3": "3.5.9-r0",
+    "libuuid": "2.42.3-r1",
+    "krb5-libs": "1.22.3-r0",
+    "libxslt": "1.1.43-r4",
+}
 
 
 def _require(text: str, token: str, surface: str, errors: list[str]) -> None:
@@ -72,21 +80,20 @@ def validate(errors: list[str]) -> None:
         "go build -trimpath -ldflags='-d -w' -buildvcs=true -o /out/gosu github.com/tianon/gosu",
         "grep -F 'go1.26.10' /out/gosu-build-info.txt",
         "COPY --from=gosu-builder /out/gosu /usr/local/bin/gosu",
-        f"'libcrypto3={OPENSSL_VERSION}'",
-        f"'libssl3={OPENSSL_VERSION}'",
-        f"'libuuid={LIBUUID_VERSION}'",
-        f"'krb5-libs={KRB5_VERSION}'",
-        f"'libxslt={LIBXSLT_VERSION}'",
-        r"grep -q '^libcrypto3-3\.5\.9-r0 '",
-        r"grep -q '^libssl3-3\.5\.9-r0 '",
-        r"grep -q '^libuuid-2\.42\.3-r1 '",
-        r"grep -q '^krb5-libs-1\.22\.3-r0 '",
-        r"grep -q '^libxslt-1\.1\.43-r4 '",
+        "apk add --no-cache --upgrade",
         "gosu nobody true",
         "USER postgres",
     )
     for token in docker_tokens:
         _require(dockerfile, token, DOCKERFILE.relative_to(ROOT).as_posix(), errors)
+
+    # Enforce all eight remediated version floors, no duplicates or omissions.
+    # apk verifies repository signatures, and Trivy checks the built image.
+    package_floors = re.findall(r"'([a-z][a-z0-9-]*)>=([^']+)'", dockerfile)
+    if len(package_floors) != len(MINIMUM_APK_VERSIONS) or dict(package_floors) != MINIMUM_APK_VERSIONS:
+        errors.append("PostgreSQL APK version floors must cover all remediated packages without duplicates or drift")
+    if re.search(r"\b(?:wget|curl)\b", dockerfile):
+        errors.append("PostgreSQL runtime patches must come from the signed apk repository")
 
     if re.search(r"\bapk\s+upgrade\b", dockerfile):
         errors.append("PostgreSQL test image must not use a floating apk upgrade operation")
@@ -126,7 +133,7 @@ def main() -> int:
         return 1
     print(
         "PostgreSQL runtime provenance: Testcontainers build wiring, immutable bases, "
-        "gosu source/toolchain, exact security package patches, non-root runtime, and Security image scan are consistent"
+        "gosu source/toolchain, signed Alpine package security floors, non-root runtime, and Security image scan are consistent"
     )
     return 0
 
