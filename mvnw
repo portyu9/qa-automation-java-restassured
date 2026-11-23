@@ -193,10 +193,28 @@ esac
 
 if [ -z "${MVNW_USERNAME-}" ] && command -v wget >/dev/null; then
   verbose "Found wget ... using wget"
-  wget ${__MVNW_QUIET_WGET:+"$__MVNW_QUIET_WGET"} "$distributionUrl" -O "$TMP_DOWNLOAD_DIR/$distributionUrlName" || die "wget: Failed to fetch $distributionUrl"
+  # Retry only the transport step; downstream distributionSha256Sum remains mandatory.
+  downloaded=false
+  for attempt in 1 2 3 4; do
+    if wget ${__MVNW_QUIET_WGET:+"$__MVNW_QUIET_WGET"} --timeout=60 "$distributionUrl" -O "$TMP_DOWNLOAD_DIR/$distributionUrlName"; then
+      downloaded=true
+      break
+    fi
+    [ "$attempt" -eq 4 ] || sleep "$((attempt * 3))"
+  done
+  [ "$downloaded" = true ] || die "wget: Failed to fetch $distributionUrl after 4 attempts"
 elif [ -z "${MVNW_USERNAME-}" ] && command -v curl >/dev/null; then
   verbose "Found curl ... using curl"
-  curl ${__MVNW_QUIET_CURL:+"$__MVNW_QUIET_CURL"} -f -L -o "$TMP_DOWNLOAD_DIR/$distributionUrlName" "$distributionUrl" || die "curl: Failed to fetch $distributionUrl"
+  # Treat HTTP 429/5xx and transient network failures as bounded retries.
+  downloaded=false
+  for attempt in 1 2 3 4; do
+    if curl ${__MVNW_QUIET_CURL:+"$__MVNW_QUIET_CURL"} -f -L --connect-timeout 30 --max-time 180 -o "$TMP_DOWNLOAD_DIR/$distributionUrlName" "$distributionUrl"; then
+      downloaded=true
+      break
+    fi
+    [ "$attempt" -eq 4 ] || sleep "$((attempt * 3))"
+  done
+  [ "$downloaded" = true ] || die "curl: Failed to fetch $distributionUrl after 4 attempts"
 elif set_java_home; then
   verbose "Falling back to use Java to download"
   javaSource="$TMP_DOWNLOAD_DIR/Downloader.java"
