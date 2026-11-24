@@ -31,6 +31,7 @@ from dependency_governance import (
     has_exact_owner_approval,
     request_dependabot_refresh,
     validate_signed_metadata,
+    verify_scheduled_owner_readiness,
     workflow_identity_matches,
 )
 
@@ -97,6 +98,42 @@ def canonical_fixture() -> tuple[str, str, dict, dict]:
 
 
 class DependencyGovernanceTests(unittest.TestCase):
+    def test_scheduled_owner_readiness_rejects_inaccessible_or_foreign_credentials(self) -> None:
+        class Owner:
+            def __init__(self, user_id: int) -> None:
+                self.user_id = user_id
+
+            def get(self, path: str) -> dict:
+                self.asserted_path = path
+                return {"login": CONFIG["ownerApprovalLogin"], "id": self.user_id}
+
+        exact = Owner(CONFIG["ownerApprovalUserId"])
+        self.assertEqual(
+            verify_scheduled_owner_readiness("schedule", exact, CONFIG),
+            {"checked": True, "identity": "verified"},
+        )
+        self.assertEqual(exact.asserted_path, "https://api.github.com/user")
+        with self.assertRaisesRegex(GovernanceError, "DEPENDABOT_OWNER_TOKEN is required"):
+            verify_scheduled_owner_readiness("schedule", None, CONFIG)
+        with self.assertRaisesRegex(GovernanceError, "configured repository owner identity"):
+            verify_scheduled_owner_readiness(
+                "schedule", Owner(CONFIG["ownerApprovalUserId"] + 1), CONFIG
+            )
+        with patch.object(exact, "get", side_effect=GovernanceError("expired PAT")):
+            with self.assertRaisesRegex(GovernanceError, "expired PAT"):
+                verify_scheduled_owner_readiness("schedule", exact, CONFIG)
+
+    def test_non_scheduled_events_do_not_probe_owner_credentials(self) -> None:
+        class Unexpected:
+            def get(self, path: str) -> dict:
+                raise AssertionError(path)
+
+        for event in ("push", "workflow_run", "workflow_dispatch", "pull_request_target"):
+            self.assertEqual(
+                verify_scheduled_owner_readiness(event, Unexpected(), CONFIG),
+                {"checked": False},
+            )
+
     def test_config_is_fail_closed(self) -> None:
         self.assertEqual(validate_config(CONFIG), [])
         major = {
